@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CC Dashboard — paneles en vivo en Claude</title>
+<meta name="description" content="Kit en español para usar los Dashboards de Claude: paneles del negocio y observabilidad de Claude Code, con prompts listos y plan por fases.">
+<link rel="alternate" hreflang="pt-BR" href="https://inematds.github.io/ccdashboard/guia/">
+<link rel="alternate" hreflang="en" href="https://inematds.github.io/ccdashboard/guia/en/">
+<link rel="alternate" hreflang="es" href="https://inematds.github.io/ccdashboard/guia/es/">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0c0c10; --bg2:#14141b; --card:#16161e; --line:#272730;
+    --txt:#e9e9ee; --mut:#9a9aa6; --amb:#E2A23B; --amb2:#f0c070; --sky:#38bdf8; --pro:#cbd5e1;
+    color-scheme:dark;
+  }
+  body.light{
+    --bg:#f6f7f9; --bg2:#eceef2; --card:#ffffff; --line:#e1e3ea;
+    --txt:#1a1a22; --mut:#5b5b68; --amb:#b9791d; --amb2:#a16207; --sky:#0369a1; --pro:#b45309;
+    color-scheme:light;
+  }
+  body.light .hero .glow{opacity:.5}
+  body.light pre{background:#0e0e14;color:#d6d6e0}
+  body.light pre .c{color:#8a8a98}
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--txt);font:16px/1.65 Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  h1,h2,h3{font-family:Sora,sans-serif;line-height:1.15;margin:0}
+  a{color:var(--amb);text-decoration:none}
+  code,pre{font-family:"JetBrains Mono",monospace}
+  .wrap{max-width:1160px;margin:0 auto;padding:0 22px}
+  .mut{color:var(--mut)} .amb{color:var(--amb)}
+  .chip{display:inline-block;font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;color:var(--amb);font-weight:600;font-family:Sora}
+  nav{position:sticky;top:0;z-index:30;backdrop-filter:blur(12px);background:rgba(12,12,16,.78);border-bottom:1px solid var(--line)}
+  nav .wrap{display:flex;align-items:center;gap:22px;height:60px}
+  nav .brand{display:flex;align-items:center;gap:8px;font-family:Sora;font-weight:800;letter-spacing:-.02em;color:var(--amb)}
+  nav .brand .emoji{font-size:1.25rem}
+  nav .sep{color:var(--mut);opacity:.45}
+  nav .inema{color:var(--sky);font-weight:600;font-size:.88rem;font-family:Sora}
+  nav .inema:hover{filter:brightness(1.15)}
+  nav .pro{color:var(--pro);font-weight:600;font-size:.88rem;font-family:Sora}
+  nav .pro:hover{filter:brightness(1.15)}
+  nav .clubpro{display:inline-flex;align-items:center;gap:6px}
+  nav .links{margin-left:auto;display:flex;align-items:center;gap:20px;font-size:.92rem}
+  nav .links a.sec{color:var(--mut)} nav .links a.sec:hover{color:var(--txt)}
+  .lang{display:inline-flex;gap:2px;font-family:Sora;font-size:.78rem}
+  .lang a{color:var(--mut);padding:.2em .45em;border-radius:6px} .lang a.on{color:var(--amb);background:rgba(226,162,59,.12)}
+  .tgl{background:var(--bg2);border:1px solid var(--line);color:var(--txt);width:38px;height:38px;border-radius:10px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:1.05rem}
+  .tgl:hover{border-color:var(--amb)}
+  .btn{display:inline-block;background:var(--amb);color:#1a1206;font-weight:600;padding:.6em 1.05em;border-radius:10px;font-family:Sora}
+  .btn.ghost{background:transparent;color:var(--txt);border:1px solid var(--line)}
+  @media(max-width:760px){nav .links a.sec{display:none}}
+  @media(max-width:520px){nav .wrap{gap:8px;padding:8px 14px;height:auto;flex-wrap:wrap} nav .links{gap:8px;margin-left:0;width:100%;justify-content:space-between} nav .btn{padding:.45em .7em;font-size:.82rem} .tgl{width:34px;height:34px}}
+  .hero{position:relative;overflow:hidden;border-bottom:1px solid var(--line)}
+  .hero .glow{position:absolute;inset:-40% -20% auto auto;width:70%;height:600px;background:radial-gradient(closest-side,rgba(226,162,59,.22),transparent 70%);pointer-events:none}
+  .hero .wrap{display:grid;grid-template-columns:1.1fr .9fr;gap:40px;align-items:center;padding:74px 22px}
+  .hero h1{font-size:clamp(2.2rem,5vw,3.5rem);font-weight:800;letter-spacing:-.025em}
+  .hero p.lead{font-size:1.18rem;color:var(--mut);margin:1.1em 0 1.6em;max-width:34ch}
+  .hero .cta{display:flex;gap:12px;flex-wrap:wrap}
+  .hero figure{margin:0;border-radius:16px;overflow:hidden;border:1px solid var(--line);box-shadow:0 30px 80px -30px #000}
+  .hero figure img{width:100%;display:block}
+  .resumo{padding:38px 0 34px;border-bottom:1px solid var(--line)}
+  .resumo p{font-size:1.12rem;line-height:1.7;max-width:74ch;margin:.55em 0 0}
+  @media(max-width:780px){.hero .wrap{grid-template-columns:1fr;padding:48px 22px}}
+  section{padding:62px 0;border-bottom:1px solid var(--line)}
+  section h2{font-size:clamp(1.5rem,3.4vw,2.1rem);font-weight:800;letter-spacing:-.02em}
+  section .sub{color:var(--mut);margin:.6em 0 2em;max-width:62ch}
+  .grid{display:grid;gap:16px}
+  .g3{grid-template-columns:repeat(3,1fr)} .g4{grid-template-columns:repeat(4,1fr)} .g2{grid-template-columns:repeat(2,1fr)}
+  @media(max-width:820px){.g3,.g4{grid-template-columns:1fr 1fr}}
+  @media(max-width:540px){.g2,.g3,.g4{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px}
+  .card h3{font-size:1.05rem;margin-bottom:.4em}
+  .card p{color:var(--mut);font-size:.92rem;margin:0}
+  .num{display:inline-flex;width:30px;height:30px;align-items:center;justify-content:center;border-radius:8px;background:rgba(226,162,59,.14);color:var(--amb);font-family:Sora;font-weight:800;font-size:.9rem;margin-bottom:.7em}
+  .flow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
+  .flow span{background:var(--bg2);border:1px solid var(--line);border-radius:999px;padding:.45em .9em;font-size:.85rem;font-family:Sora;font-weight:600}
+  .flow .arr{color:var(--amb);border:none;background:none;padding:0 .1em}
+  pre{background:#0a0a0e;border:1px solid var(--line);border-radius:12px;padding:16px 18px;overflow:auto;font-size:.86rem;line-height:1.6;color:#d6d6e0}
+  pre .c{color:#6f6f7c} pre .k{color:var(--amb2)} pre .s{color:#9ece6a}
+  .step{display:grid;grid-template-columns:46px minmax(0,1fr);gap:16px;margin-bottom:26px}
+  .step>div,.card{min-width:0}
+  p code,li code,td code{overflow-wrap:anywhere}
+  .step .b{width:46px;height:46px;border-radius:12px;background:var(--amb);color:#1a1206;font-family:Sora;font-weight:800;font-size:1.25rem;display:flex;align-items:center;justify-content:center}
+  .step h3{font-size:1.12rem;margin-bottom:.3em}
+  .step p{color:var(--mut);margin:.2em 0 .7em}
+  .ex{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:680px){.ex{grid-template-columns:1fr}}
+  .ex figure{margin:0;border-radius:14px;overflow:hidden;border:1px solid var(--line)}
+  .ex figure img{width:100%;display:block}
+  .ex figcaption{padding:12px 14px;font-size:.88rem;color:var(--mut);background:var(--card)}
+  .phase{display:flex;gap:14px;padding:16px 0;border-bottom:1px solid var(--line)}
+  .phase:last-child{border:none}
+  .phase .tag{flex:0 0 92px;font-family:Sora;font-weight:800;color:var(--amb)}
+  .phase .d strong{display:block;margin-bottom:.2em}
+  .phase .d span{color:var(--mut);font-size:.92rem}
+  footer{padding:46px 0;text-align:center;color:var(--mut);font-size:.9rem}
+  .pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:.3em .8em;font-size:.78rem;color:var(--mut);margin:0 4px}
+</style>
+</head>
+<body>
+
+<nav><div class="wrap">
+  <a class="brand" href="#top"><span class="emoji">📊</span> CC Dashboard</a>
+  <span class="sep">|</span>
+  <span class="clubpro">
+    <a class="inema" href="https://inema.club" target="_blank" rel="noopener">INEMA.CLUB</a>
+    <span class="sep">-</span>
+    <a class="pro" href="https://inema.pro" target="_blank" rel="noopener">PRO</a>
+  </span>
+  <div class="links">
+    <a class="sec" href="#oque">Qué es</a>
+    <a class="sec" href="#fluxo">Cómo funciona</a>
+    <a class="sec" href="#guia">Guía de uso</a>
+    <a class="sec" href="#exemplos">Ejemplos</a>
+    <a class="sec" href="#roadmap">Plan</a>
+    <span class="lang"><a href="../">PT</a><a href="../en/">EN</a><a class="on" href="./">ES</a></span>
+    <button class="tgl" id="themeToggle" aria-label="Alternar tema" title="Alternar tema">🌙</button>
+    <a class="btn" href="https://github.com/inematds/ccdashboard" target="_blank" rel="noopener">GitHub</a>
+  </div>
+</div></nav>
+
+<header class="hero" id="top">
+  <div class="glow"></div>
+  <div class="wrap">
+    <div>
+      <span class="chip">Claude Dashboards · kit en español</span>
+      <h1>Pregúntale a Claude y obtén un panel <span class="amb">en vivo</span></h1>
+      <p class="lead">Un kit de prompts y un plan por fases para armar paneles que se actualizan solos: uno para tu negocio y otro para ver qué hace tu Claude Code, cuánto falla y cuánto costaría.</p>
+      <div class="cta">
+        <a class="btn" href="#guia">Empezar la guía</a>
+        <a class="btn ghost" href="https://github.com/inematds/ccdashboard" target="_blank" rel="noopener">Ver en GitHub</a>
+      </div>
+    </div>
+    <figure><img src="../assets/banner-es.jpg" alt="Banner Panel en Vivo: Dashboards de Claude para tu negocio y para tu Claude Code"></figure>
+  </div>
+</header>
+
+<section id="resumo" class="resumo"><div class="wrap">
+  <span class="chip">En resumen</span>
+  <p>CC Dashboard es un kit en español para usar los Dashboards de Claude, paneles que guardan las consultas y rehacen las cuentas cada vez que los abres. Sirve para dueños de pequeños negocios y para quienes usan Claude Code todos los días. Trae prompts listos para armar paneles del negocio (dinero, atrasos, fugas) y un plan para medir tu propio Claude Code (costo estimado, herramientas, fallas). Para usarlo necesitas un plan de pago de Claude y, en las partes con base de datos, una cuenta gratuita en Supabase.</p>
+</div></section>
+
+<section id="oque"><div class="wrap">
+  <span class="chip">Qué es</span>
+  <h2>Un panel que guarda la <span class="amb">pregunta</span>, no solo la respuesta</h2>
+  <p class="sub">Un panel antiguo era una foto tomada una sola vez. El Dashboard de Claude guarda las consultas y las ejecuta de nuevo sobre tus datos cada vez que se abre.</p>
+  <figure style="margin:0 0 26px;border-radius:16px;overflow:hidden;border:1px solid var(--line);box-shadow:0 30px 80px -30px #000"><img src="../assets/banner-grade-es.jpg" alt="Conectores, preguntas, verificación, Supabase, telemetría y programación" loading="lazy" style="width:100%;display:block"></figure>
+  <div class="grid g3">
+    <div class="card"><h3>💼 Panel del negocio</h3><p>Dónde está el dinero, qué está atrasado, dónde pierdes ingresos. Empieza con una app y crece hasta una base central que cruza varias.</p></div>
+    <div class="card"><h3>🔭 Panel de Claude Code</h3><p>Sesiones, tokens, caché, costo estimado, herramientas y servidores MCP que más fallan, skills más usadas y la salud del recolector.</p></div>
+    <div class="card"><h3>🔍 Número verificable</h3><p>Cada tarjeta muestra la consulta y la hora de la última actualización. El kit enseña a leer la consulta y a verificar un número en su origen antes de actuar.</p></div>
+  </div>
+</div></section>
+
+<section id="fluxo"><div class="wrap">
+  <span class="chip">Cómo funciona</span>
+  <h2>Dos caminos, el mismo principio</h2>
+  <p class="sub">El panel solo muestra lo que Claude logra leer. En el negocio, la lectura viene de los conectores; en Claude Code, viene de la telemetría que él mismo envía.</p>
+  <h3 style="margin:18px 0 10px">Negocio</h3>
+  <div class="flow">
+    <span>Apps (CRM, hoja de cálculo, base de datos)</span><span class="arr">→</span>
+    <span>Conector en Claude</span><span class="arr">→</span>
+    <span>Base central en Supabase (cuando cruza apps)</span><span class="arr">→</span>
+    <span>Dashboard</span><span class="arr">→</span>
+    <span>Copia programada</span>
+  </div>
+  <h3 style="margin:26px 0 10px">Claude Code</h3>
+  <div class="flow">
+    <span>Claude Code (OpenTelemetry)</span><span class="arr">→</span>
+    <span>Recolector en Supabase (filtra campos)</span><span class="arr">→</span>
+    <span>Tablas en bruto (7 días)</span><span class="arr">→</span>
+    <span>Resumen diario (cada 10 min)</span><span class="arr">→</span>
+    <span>Dashboard</span>
+  </div>
+  <div class="grid g3" style="margin-top:26px">
+    <div class="card"><h3>🔒 Qué guarda el recolector</h3><p>Nombre del modelo, de la herramienta, de la skill y del servidor MCP, conteo de tokens, costo estimado, duración, éxito o falla, tipo de error y nombre de la máquina.</p></div>
+    <div class="card"><h3>🗑️ Qué descarta</h3><p>Texto de los prompts y de las respuestas, comandos completos, rutas de archivos, entradas y salidas de herramientas, texto de error y correo electrónico. Del shell solo queda el nombre del programa.</p></div>
+    <div class="card"><h3>⏱️ Cuatro relojes</h3><p>Claude Code envía cada pocos segundos, el resumen se recalcula cada 10 min, el panel rehace las consultas al abrirse, y las otras apps solo están tan actualizadas como la última copia.</p></div>
+  </div>
+</div></section>
+
+<section id="pre"><div class="wrap">
+  <span class="chip">Requisitos previos</span>
+  <h2>Lo que necesitas tener</h2>
+  <p class="sub">La función está en beta y cuenta en el uso de tu plan.</p>
+  <div class="grid g3">
+    <div class="card"><h3>Plan de pago de Claude</h3><p>Pro, Max, Team o Enterprise. En Enterprise, un administrador activa los Dashboards en la configuración de la organización, en Artifacts.</p></div>
+    <div class="card"><h3>Cuenta en Supabase</h3><p>Gratis para empezar (500 MB). El proyecto gratuito se pausa tras una semana sin uso. Solo se necesita en las fases con base central y en el panel de Claude Code.</p></div>
+    <div class="card"><h3>Claude Code</h3><p>Solo para el panel de observabilidad. Las variables sirven para Mac, Linux y Windows; pruébalo en tu sistema antes de confiar.</p><pre><span class="c"># dónde va la configuración</span>
+~/.claude/settings.json</pre></div>
+  </div>
+</div></section>
+
+<section id="guia"><div class="wrap">
+  <span class="chip">Guía de uso · paso a paso</span>
+  <h2>Del primer panel al panel de Claude Code</h2>
+  <p class="sub">Los prompts están en la carpeta <code>prompts/</code> del repositorio (en portugués). Cópialos, cambia lo que está entre corchetes y pégalos en un chat de Claude.</p>
+
+  <div class="step"><div class="b">1</div><div>
+    <h3>Activa el conector</h3>
+    <p>En <em>Customize → Connectors</em>, agrega la app donde está la respuesta. Para Supabase de solo lectura y restringido a un proyecto, usa un conector personalizado con esta dirección:</p>
+<pre><span class="s">https://mcp.supabase.com/mcp?project_ref=SEU_PROJECT_REF&amp;read_only=true</span></pre>
+  </div></div>
+
+  <div class="step"><div class="b">2</div><div>
+    <h3>Pide el panel diciendo qué quieres saber</h3>
+    <p>"¿Qué facturas están atrasadas y desde hace cuánto?" rinde más que "un gráfico de facturas". Da las definiciones y prohíbe modificar datos. Modelo completo en <code>prompts/01-dashboard-negocio.md</code>.</p>
+<pre><span class="k">Arma un Dashboard de Claude</span> usando mi conexión con [app].
+Pregunta: [lo que cambia lo que haré mañana].
+Definiciones: [saldo = total − pagado; pagado vacío = 0].
+<span class="c"># Usa consultas guardadas, no modifiques datos, pregunta si falta algo.</span></pre>
+  </div></div>
+
+  <div class="step"><div class="b">3</div><div>
+    <h3>Verifica un número antes de actuar</h3>
+    <p>Haz clic en el número y lee la consulta: fecha de referencia, qué registros entran, si descuenta pagos parciales y dónde quedan los bordes de los tramos. Después compara un número con la app de origen (<code>prompts/02-conferir-numero.md</code>).</p>
+<pre><span class="c"># la consulta muestra cómo se calculó — no garantiza que esté correcto</span></pre>
+  </div></div>
+
+  <div class="step"><div class="b">4</div><div>
+    <h3>Cruza apps en una base central</h3>
+    <p>Horas × facturas, suscripciones × cobros, utilidad × dinero en el banco: esto exige copiar los registros a Supabase. Empieza con una pregunta, dos tablas y un piloto de 90 días (<code>prompts/03-base-central.md</code>).</p>
+<pre><span class="k">Quiero responder:</span> ¿qué trabajo se entregó y nunca se facturó?
+<span class="c"># Claude propone el schema y el piloto y espera tu OK</span></pre>
+  </div></div>
+
+  <div class="step"><div class="b">5</div><div>
+    <h3>Programa la actualización</h3>
+    <p>Sin copia programada, el panel lee datos viejos. Pide una tarea diaria o semanal y una tarjeta "Última actualización" (<code>prompts/05-agendar-atualizacao.md</code>).</p>
+<pre><span class="k">Crea una tarea programada</span> que, todos los días a las 6h, vuelva a copiar [app] al schema [nombre].</pre>
+  </div></div>
+
+  <div class="step"><div class="b">6</div><div>
+    <h3>Arma el panel de Claude Code</h3>
+    <p>Con el conector de Supabase con escritura (solo para el armado), pega <code>prompts/04-observabilidade-claude-code.md</code> en un chat nuevo. Claude pregunta el proyecto, la zona horaria y el nombre de la máquina, lista los pasos y espera tu OK.</p>
+<pre><span class="c"># crea: schema cc_obs, función cc-coletor, resumen cada 10 min, limpieza diaria</span></pre>
+  </div></div>
+
+  <div class="step"><div class="b">7</div><div>
+    <h3>Activa la telemetría y reinicia</h3>
+    <p>Pega el bloque <code>env</code> en <code>~/.claude/settings.json</code> (modelo en <code>config/claude-code-otel.example.json</code>). Cierra Claude Code por completo y ábrelo de nuevo: solo lee esas variables al iniciar.</p>
+<pre>{ <span class="s">"env"</span>: {
+  <span class="s">"CLAUDE_CODE_ENABLE_TELEMETRY"</span>: "1",
+  <span class="s">"OTEL_EXPORTER_OTLP_PROTOCOL"</span>: "http/json",
+  <span class="s">"OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"</span>: "https://&lt;ref&gt;.supabase.co/functions/v1/cc-coletor/v1/logs",
+  <span class="s">"OTEL_EXPORTER_OTLP_HEADERS"</span>: "x-cc-key=&lt;clave&gt;",
+  <span class="c">… (bloque completo en el archivo de ejemplo)</span>
+} }</pre>
+  </div></div>
+
+  <div class="step"><div class="b">8</div><div>
+    <h3>Prueba y abre el panel</h3>
+    <p>En una sesión nueva, envía un prompt simple y avisa a Claude en el chat. Él verifica que el recolector recibió los datos y arma las cinco pestañas. Dale un día de uso antes de juzgar los gráficos.</p>
+<pre><span class="k">claude --debug-file /tmp/cc.log</span>  <span class="c"># si no llega nada, busca líneas [3P telemetry]</span></pre>
+  </div></div>
+</div></section>
+
+<section id="exemplos"><div class="wrap">
+  <span class="chip">Ejemplos</span>
+  <h2>Preguntas que se vuelven paneles</h2>
+  <p class="sub">Lo que funciona bien: una pregunta que cambia una decisión, con una definición clara.</p>
+  <div class="grid g3">
+    <div class="card"><h3>💰 Facturas atrasadas</h3><p>Saldo pendiente por tramo (por vencer, 1–30, 31–60, 61–90, 90+ días), por cliente, con la fecha de referencia explícita.</p></div>
+    <div class="card"><h3>🧾 Trabajo no facturado</h3><p>Horas registradas que no aparecen en ninguna línea de factura — exige una base central con las dos fuentes.</p></div>
+    <div class="card"><h3>🏦 Utilidad × caja</h3><p>Resultado contable del mes frente al dinero que realmente entró y salió del banco.</p></div>
+    <div class="card"><h3>🛠️ Herramienta que más falla</h3><p>Llamadas, % de falla y duración p50/p95 por herramienta y por servidor MCP en los últimos 7 días.</p></div>
+    <div class="card"><h3>🧠 Caché que no pega</h3><p>Tokens de caché leídos frente a creados por día — un caché que se reconstruye a cada rato aparece aquí.</p></div>
+    <div class="card"><h3>🧩 Costo por skill</h3><p>Uso y costo estimado por skill y por tipo de subagente, para saber qué vale la pena mantener.</p></div>
+  </div>
+</div></section>
+
+<section id="limites"><div class="wrap">
+  <span class="chip">Antes de confiar</span>
+  <h2>Límites que debes conocer</h2>
+  <div class="grid g3">
+    <div class="card"><h3>Muestra, no avisa</h3><p>El panel no envía alertas. Para recibir un aviso cuando un número pasa del límite, crea una rutina programada aparte.</p></div>
+    <div class="card"><h3>El costo es una estimación</h3><p>El valor es lo que costaría el uso a precio de API. En Pro o Max, lo que se paga es la suscripción.</p></div>
+    <div class="card"><h3>Cada persona con su conexión</h3><p>Quien recibe el panel necesita acceso propio al mismo proyecto de Supabase; sin eso las tarjetas quedan vacías.</p></div>
+    <div class="card"><h3>Los nombres también cuentan</h3><p>Los nombres de skills, repositorios y servidores MCP quedan guardados. Piensa en quién lo va a ver.</p></div>
+    <div class="card"><h3>Solo Claude Code</h3><p>El chat de la app y Cowork no entran en este panel de observabilidad.</p></div>
+    <div class="card"><h3>Espacio en la base</h3><p>500 MB en el plan gratuito. Los datos en bruto duran 7 días, el resumen se queda para siempre. Vigila la tarjeta de tamaño.</p></div>
+  </div>
+</div></section>
+
+<section id="roadmap"><div class="wrap">
+  <span class="chip">Plan</span>
+  <h2>Fases para construir el sistema</h2>
+  <p class="sub">El plan completo está en <code>PLANO.md</code> (en portugués). Orden sugerido: primero el panel de Claude Code (una tarde), después el del negocio.</p>
+  <div class="phase"><div class="tag">B0–B1</div><div class="d"><strong>Proyecto y base de datos</strong><span>Schema cc_obs, filtro por lista de campos permitidos, resumen diario, limpieza de 7 días, rol de solo lectura.</span></div></div>
+  <div class="phase"><div class="tag">B2–B3</div><div class="d"><strong>Recolector y telemetría</strong><span>Función cc-coletor con clave por máquina; bloque env en Claude Code; reiniciar y probar.</span></div></div>
+  <div class="phase"><div class="tag">B4</div><div class="d"><strong>Panel de cinco pestañas</strong><span>Visión general, gasto y caché, herramientas y MCP, skills y subagentes, salud del recolector.</span></div></div>
+  <div class="phase"><div class="tag">A1–A2</div><div class="d"><strong>Panel del negocio directo desde la app</strong><span>Pregunta + definiciones + verificación de un número en el origen.</span></div></div>
+  <div class="phase"><div class="tag">A3–A4</div><div class="d"><strong>Base central y copia programada</strong><span>Una pregunta que cruza dos apps, piloto de 90 días, actualización diaria o semanal.</span></div></div>
+  <div class="phase"><div class="tag">A5</div><div class="d"><strong>Diagnóstico y seguimiento</strong><span>Barrido de solo lectura, problemas que se suman, plan priorizado y, con tu sí, un panel que marca cada ítem como hecho.</span></div></div>
+  <div class="phase"><div class="tag">B5–B7</div><div class="d"><strong>Más máquinas, historial y alertas</strong><span>Una clave por máquina, importación del historial local de sesiones y avisos por mensaje.</span></div></div>
+</div></section>
+
+<footer>
+  <div class="wrap">
+    <div class="pill">Claude Dashboards</div><div class="pill">Supabase</div><div class="pill">OpenTelemetry</div>
+    <p style="margin-top:18px">CC Dashboard · kit de prompts y plan en español ·
+      <a href="https://github.com/inematds/ccdashboard">inematds/ccdashboard</a> ·
+      <a href="https://inema.club">INEMA.CLUB</a></p>
+  </div>
+</footer>
+
+<script>
+  (function(){
+    var KEY='ccdashboard-theme';
+    var b=document.body, t=document.getElementById('themeToggle');
+    if(localStorage.getItem(KEY)==='light'){ b.classList.add('light'); t.textContent='☀️'; }
+    t.addEventListener('click',function(){
+      var light=b.classList.toggle('light');
+      t.textContent=light?'☀️':'🌙';
+      localStorage.setItem(KEY, light?'light':'dark');
+    });
+  })();
+</script>
+</body>
+</html>
