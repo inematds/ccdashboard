@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Painel local da telemetria de agentes. Escuta só em 127.0.0.1.
+"""Painel da telemetria de agentes.
 
-Lê o SQLite em modo somente leitura e entrega a página (painel.html) e as
-rotas /api/agora, /api/processamentos, /api/falhas, /api/uso, /api/historico
-e /api/saude.
+Escuta em 127.0.0.1 e nos endereços de TELEMETRIA_HOSTS (padrão: a rede local
+192.168.2.99) e só atende clientes de TELEMETRIA_REDES. Lê o SQLite em modo
+somente leitura e entrega a página (painel.html) e as rotas /api/*.
+Também sobe os coletores da T4 (OTLP em 127.0.0.1:4318) e da T5 (Codex).
 """
+import ipaddress
 import json
 import os
+import threading
 import sqlite3
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -20,6 +23,10 @@ PARADA_MIN = int(os.environ.get("TELEMETRIA_PARADA_MIN", "10"))
 SETTINGS = os.path.expanduser("~/.claude/settings.json")
 PAGINA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "painel.html")
 HOOK = "telemetria/hook/registra.py"
+HOSTS = [h.strip() for h in os.environ.get("TELEMETRIA_HOSTS", "127.0.0.1,192.168.2.99").split(",") if h.strip()]
+REDES = [ipaddress.ip_network(r.strip()) for r in
+         os.environ.get("TELEMETRIA_REDES", "127.0.0.0/8,192.168.2.0/24").split(",") if r.strip()]
+PORTA_OTLP = int(os.environ.get("TELEMETRIA_PORTA_OTLP", "4318"))
 
 
 def conectar():
@@ -82,7 +89,7 @@ def api_agora(con):
         rodando = [p for p in pend if p["sessao"] == s["sessao"]]
         parada_ha = agora - s["ultimo_ts"]
         if s["estado"] == "esperando":
-            selo = "pede permissão" if s["ultimo_evento"] in ("PermissionRequest", "Notification") else "esperando você"
+            selo = "pede permissão" if s["ultimo_evento"] == "PermissionRequest" else "esperando você"
         elif rodando:
             selo = "processando"
         elif parada_ha > PARADA_MIN * 60:
@@ -215,7 +222,26 @@ def api_saude(con):
     }
 
 
+def api_consumo(con):
+    hoje = inicio_do_dia()
+    semana = time.time() - 7 * 86400
+    soma = ("SUM(COALESCE(entrada,0)) entrada, SUM(COALESCE(saida,0)) saida,"
+            " SUM(COALESCE(cache_leitura,0)) cache_leitura, SUM(COALESCE(cache_escrita,0)) cache_escrita,"
+            " ROUND(SUM(COALESCE(custo_usd,0)),2) custo_usd, COUNT(*) chamadas")
+    return {
+        "hoje": linhas(con, f"SELECT fonte, {soma} FROM consumo WHERE ts > ? GROUP BY fonte", (hoje,)),
+        "modelos_7d": linhas(con, f"SELECT fonte, COALESCE(modelo,'?') modelo, {soma} FROM consumo WHERE ts > ?"
+                                  " GROUP BY 1,2 ORDER BY custo_usd DESC, entrada DESC", (semana,)),
+        "projetos_hoje": linhas(con, f"SELECT c.fonte, COALESCE(s.projeto,'?') projeto, {soma} FROM consumo c"
+                                     " LEFT JOIN sessoes s ON s.sessao=c.sessao WHERE c.ts > ? GROUP BY 1,2"
+                                     " ORDER BY custo_usd DESC, entrada DESC LIMIT 30", (hoje,)),
+        "dias": linhas(con, f"SELECT date(ts,'unixepoch','localtime') dia, fonte, {soma} FROM consumo"
+                            " WHERE ts > ? GROUP BY 1,2 ORDER BY 1 DESC", (time.time() - 30 * 86400,)),
+    }
+
+
 ROTAS = {
+    "/api/consumo": api_consumo,
     "/api/agora": api_agora,
     "/api/processamentos": api_processamentos,
     "/api/falhas": api_falhas,
@@ -237,6 +263,12 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(corpo)
 
     def do_GET(self):
+        try:
+            cliente = ipaddress.ip_address(self.client_address[0])
+        except ValueError:
+            cliente = None
+        if cliente is None or not any(cliente in r for r in REDES):
+            return self.responder(403, b"fora da rede permitida", "text/plain")
         caminho = self.path.split("?", 1)[0]
         if caminho in ("/", "/index.html"):
             with open(PAGINA, "rb") as f:
@@ -257,5 +289,21 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"painel em http://127.0.0.1:{PORTA}/  banco: {DB}", flush=True)
-    ThreadingHTTPServer(("127.0.0.1", PORTA), Handler).serve_forever()
+    import coletores
+
+    if os.environ.get("TELEMETRIA_OTLP", "1") == "1":
+        coletores.servidor_otlp(DB, PORTA_OTLP)
+    if os.environ.get("TELEMETRIA_CODEX", "1") == "1":
+        coletores.laco_codex(DB)
+    servidores = []
+    for host in HOSTS:
+        try:
+            servidores.append(ThreadingHTTPServer((host, PORTA), Handler))
+            print(f"painel em http://{host}:{PORTA}/", flush=True)
+        except OSError as e:
+            print(f"não consegui escutar em {host}:{PORTA}: {e}", flush=True)
+    if not servidores:
+        raise SystemExit(1)
+    for srv in servidores[1:]:
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+    servidores[0].serve_forever()

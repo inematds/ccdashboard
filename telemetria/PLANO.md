@@ -3,14 +3,17 @@
 Painel **local** que mostra, ao vivo, tudo o que os agentes estão fazendo na máquina: cada sessão do
 Claude Code (terminais, bots, `claude -p`, loops longos, subagentes) e do Codex CLI.
 
-Status (13/10/2026): **T0–T3 prontas e instaladas** nesta máquina. T4–T8 ainda são plano.
+Status (13/10/2026): **T0–T5 prontas e instaladas** nesta máquina. T6–T8 ainda são plano.
 
 | Peça | Arquivo |
 |---|---|
 | Coletor por hook | `hook/registra.py` |
 | Instalar / remover | `instalar.sh` / `desinstalar.sh` (via `ajusta_hooks.py`, com backup do `settings.json`) |
 | Manutenção (resumo, limpeza 30 dias, WAL) | `manutencao.py` + `systemd/telemetria-manutencao.timer` (de hora em hora) |
-| Painel | `painel/servidor.py` + `painel/painel.html` → **http://127.0.0.1:8766/** (serviço `telemetria-painel`) |
+| Painel | `painel/servidor.py` + `painel/painel.html` → **http://127.0.0.1:8766/** e **http://192.168.2.99:8766/** (serviço `telemetria-painel`; só atende 127.0.0.0/8 e 192.168.2.0/24) |
+| T4 · OpenTelemetry | `painel/coletores.py` — receptor OTLP em 127.0.0.1:4318; variáveis `OTEL_*` no `env` do `settings.json` |
+| T5 · Codex | `painel/coletores.py` — lê `~/.codex/sessions/**/*.jsonl` a cada 15 s (últimos 2 dias, posição guardada por arquivo) |
+| Ligar / desligar | `./telemetria.sh ligar` · `./telemetria.sh desligar` · `./telemetria.sh status` |
 | Banco | `~/.local/share/telemetria-agentes/eventos.db` (fora do repo) |
 
 **Resultado da T0:** ~3–5 mil chamadas de ferramenta por dia (pico 5,2 mil em 10/10) → ~10 mil eventos/dia,
@@ -47,7 +50,7 @@ Codex CLI ── sessões no disco (~/.codex/sessions) ─────┤
                                                        ▼
                          ~/.local/share/telemetria-agentes/eventos.db  (SQLite, modo WAL)
                                                        │
-                                     servidor local 127.0.0.1:8766
+                                     servidor 127.0.0.1 + 192.168.2.99 :8766
                                                        │
                                      painel HTML (atualiza a cada 5 s)
 ```
@@ -173,3 +176,46 @@ T0 → T1 → T2 → T3 (uma tarde, já entrega o painel "Agora") · T4 · T5 ·
 | Largura de celular (380 px) | sem rolagem horizontal |
 
 Ajuste feito: a porta 8765 já era usada por outro serviço local; o painel ficou na **8766**.
+
+## 8. T4 e T5 — feito em 13/10/2026
+
+- **T4:** o Claude Code manda um evento `api_request` por chamada ao modelo para `127.0.0.1:4318`. Guardamos
+  só modelo, tokens (entrada, saída, cache lido, cache criado), custo estimado e duração, na tabela `consumo`.
+  Erro de API vira evento `ApiError`. Pacote de outro programa que herdou as variáveis `OTEL_*` é ignorado
+  (só entra `service.name` com "claude"). Métricas e traces: aceitos e descartados.
+- **T5:** pelos arquivos de sessão do Codex (não pela telemetria dele): sessão, modelo, turnos, comandos
+  (só o programa), duração e tokens. `codex exec` some da aba Agora quando termina; o Codex interativo
+  fica "esperando você". O Codex não informa preço, então o custo fica em branco.
+- **Aba Consumo:** hoje, por modelo (7 dias), por projeto (hoje) e por dia (30 dias), separado por fonte.
+
+| Teste | Resultado |
+|---|---|
+| sessão nova `claude -p` | chegou `claude-opus-5-5`, 2 entrada / 4 saída / 12.249 cache lido / 45.126 cache criado, US$ 0,36 estimado, 4,6 s |
+| frase-sentinela no prompt com OTel ligado | **0** ocorrências no banco |
+| Codex | 784 arquivos de sessão importados (2 dias), 3.273 registros de tokens |
+| acesso por 192.168.2.99 | 200; por wi-fi (192.168.1.172) e Tailscale: recusado (não escuta lá) |
+| cliente fora de `TELEMETRIA_REDES` | 403 "fora da rede permitida" |
+
+## 9. Custo de máquina (medido em 13/10/2026)
+
+| Item | Custo |
+|---|---|
+| Hook | ~29 ms por evento; 2 eventos por ferramenta → ~60 ms a mais por chamada de ferramenta. ~10–20 mil eventos/dia ≈ 5–10 min de CPU por dia, espalhados |
+| Serviço do painel + coletores | ~13 MB de RAM; teto `MemoryMax=256M`, `CPUQuota=50%` |
+| Leitura do Codex | 0,02 s a cada 15 s quando não há novidade (~2 min de CPU por dia) |
+| OTLP | desprezível (um POST pequeno a cada 5 s por sessão ativa) |
+| Disco | ~3–5 MB/dia; com a limpeza de 30 dias, teto esperado ~100–150 MB |
+| Rede | nenhuma saída da máquina; só localhost e a rede 192.168.2.x |
+
+## 10. Ligar e desligar
+
+```bash
+cd ~/projetos/ccdashboard/telemetria
+./telemetria.sh status     # o que está ligado
+./telemetria.sh desligar   # tira hooks e OTEL_* do settings.json, para painel e manutenção (banco fica)
+./telemetria.sh ligar      # põe tudo de volta (backup do settings.json a cada vez)
+```
+
+Só pausar o painel (hooks continuam gravando): `systemctl --user stop telemetria-painel.service`.
+Só o Codex ou só o OTLP: `TELEMETRIA_CODEX=0` / `TELEMETRIA_OTLP=0` no serviço. Os hooks e o OTel valem
+para sessões novas e para o próximo evento das abertas; o OTel só pega sessões abertas depois de ligado.

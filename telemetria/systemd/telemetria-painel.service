@@ -1,11 +1,14 @@
 [Unit]
-Description=Painel local da telemetria de agentes (127.0.0.1:8766)
+Description=Painel da telemetria de agentes (127.0.0.1 e 192.168.2.99:8766) + coletores OTLP/Codex
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 ExecStart=/usr/bin/python3 @AQUI@/painel/servidor.py
 Restart=on-failure
 RestartSec=5
 MemoryMax=256M
+CPUQuota=50%
 
 [Install]
 WantedBy=default.target

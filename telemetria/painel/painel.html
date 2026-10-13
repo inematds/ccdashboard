@@ -42,14 +42,14 @@ code{font-family:"JetBrains Mono",monospace;font-size:12px}
 <body>
 <header>
   <h1>📡 Telemetria de Agentes</h1>
-  <span class="mut">Claude Code · local</span>
+  <span class="mut">Claude Code + Codex · local</span>
   <span class="st" id="st">carregando…</span>
   <button id="tema" title="claro/escuro">🌙</button>
 </header>
 <nav id="abas"></nav>
 <main id="conteudo"></main>
 <script>
-const ABAS=[["agora","Agora"],["processamentos","Processamentos"],["falhas","Falhas"],["uso","Uso (7 dias)"],["historico","Histórico"],["saude","Saúde"]];
+const ABAS=[["agora","Agora"],["processamentos","Processamentos"],["consumo","Consumo"],["falhas","Falhas"],["uso","Uso (7 dias)"],["historico","Histórico"],["saude","Saúde"]];
 let aba=(()=>{try{return localStorage.getItem("aba")||"agora"}catch(e){return "agora"}})();
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -64,6 +64,8 @@ agora(d){const c=d.contagem;let h='<div class="kpis">'+[["Ativas",d.total],["Pro
  d.sessoes.sort((a,b)=>ordem[a.selo]-ordem[b.selo]);
  return h+'<div class="grid">'+d.sessoes.map(s=>'<div class="card"><h3>'+esc(s.projeto||"?")+' <span class="selo s-'+s.selo.replace(/ /g,"-")+'">'+s.selo+'</span></h3><div class="mut">'+[s.origem,s.modelo,"sessão "+s.sessao].filter(Boolean).map(esc).join(" · ")+'</div><div style="margin-top:6px">registrada há '+dur(s.desde_s)+" · último sinal há "+dur(s.ultimo_s)+"</div><div>última: <code>"+esc(s.ultima||"—")+"</code>"+(s.subagentes?" · "+s.subagentes+" subagente(s)":"")+"</div>"+s.rodando.map(r=>'<div class="mut">▶ <code>'+esc(r.o_que)+"</code> há "+dur(r.ha_s)+(r.subagente?" (subagente)":"")+"</div>").join("")+"</div>").join("")+"</div>"},
 processamentos(d){return"<h2>Rodando agora</h2>"+tabela([["O quê",r=>"<code>"+esc(r.programa||r.ferramenta)+"</code>"],["Projeto",r=>esc(r.projeto)],["Há",r=>dur(r.ha_s)],["Subagente",r=>r.agente?"sim":""]],d.rodando)+"<h2>Concluídos hoje (≥ 30 s)</h2>"+tabela([["Hora",r=>hora(r.ts)],["O quê",r=>"<code>"+esc(r.programa||r.ferramenta)+"</code>"],["Projeto",r=>esc(r.projeto)],["Duração",r=>dur(r.duracao_ms/1000)],["Resultado",r=>r.status==="erro"?'<span style="color:var(--err)">'+esc(r.erro_tipo)+"</span>":"ok"]],d.longos_hoje)},
+consumo(d){const n=x=>x==null?"—":x>=1e6?(x/1e6).toFixed(1)+" M":x>=1e3?(x/1e3).toFixed(1)+" mil":x;const usd=x=>x?"US$ "+Number(x).toFixed(2):"—";const cols=[["Fonte",r=>esc(r.fonte)],["Chamadas",r=>r.chamadas],["Entrada",r=>n(r.entrada)],["Saída",r=>n(r.saida)],["Cache lido",r=>n(r.cache_leitura)],["Cache criado",r=>n(r.cache_escrita)],["Custo estimado",r=>usd(r.custo_usd)]];
+ return '<p class="mut">Custo = estimativa em preço de API (só Claude Code; o Codex não informa preço). Na assinatura quem manda é o plano.</p><h2>Hoje</h2>'+tabela(cols,d.hoje)+"<h2>Por modelo (7 dias)</h2>"+tabela([["Modelo",r=>esc(r.modelo)]].concat(cols),d.modelos_7d)+"<h2>Por projeto (hoje)</h2>"+tabela([["Projeto",r=>esc(r.projeto)]].concat(cols),d.projetos_hoje)+"<h2>Por dia (30 dias)</h2>"+tabela([["Dia",r=>r.dia]].concat(cols),d.dias)},
 falhas(d){return"<h2>Taxa de falha hoje</h2>"+tabela([["Alvo",r=>"<code>"+esc(r.alvo)+"</code>"],["Chamadas",r=>r.total],["Erros",r=>r.erros],["Taxa",r=>'<span style="color:'+(r.taxa>=30?"var(--err)":"var(--warn)")+'">'+r.taxa+"%</span>"]],d.taxa)+"<h2>Erros hoje por tipo</h2>"+tabela([["Alvo",r=>"<code>"+esc(r.alvo)+"</code>"],["Programa",r=>esc(r.programa||"")],["Tipo",r=>esc(r.erro_tipo)],["Vezes",r=>r.n],["Último",r=>hora(r.ultima)]],d.por_alvo)},
 uso(d){return"<h2>Skills</h2>"+barras(d.skills)+"<h2>Servidores MCP</h2>"+barras(d.mcps)+"<h2>Subagentes</h2>"+barras(d.subagentes)+"<h2>Ferramentas</h2>"+barras(d.ferramentas)+"<h2>Programas no Bash</h2>"+barras(d.programas)+"<h2>Projetos</h2>"+barras(d.projetos)},
 historico(d){const m=Math.max(1,...d.dias.map(r=>r.chamadas||0));return"<h2>Últimos 30 dias</h2>"+tabela([["Dia",r=>r.dia],["Sessões",r=>r.sessoes],["Pedidos",r=>r.pedidos],["Chamadas",r=>r.chamadas],["Falhas",r=>r.falhas],["",r=>'<div class="bar" style="width:'+(100*(r.chamadas||0)/m)+'%"></div>']],d.dias.slice().reverse())},
