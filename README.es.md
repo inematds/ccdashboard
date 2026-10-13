@@ -58,6 +58,26 @@ https://mcp.supabase.com/mcp?project_ref=SEU_PROJECT_REF&read_only=true
 
 Si no llega nada al recolector: `claude --debug-file /tmp/cc.log` y busca líneas `[3P telemetry]`. La tabla de síntomas (401, 404, 415, tarjetas vacías) está al final de `prompts/04-observabilidade-claude-code.md`.
 
+## Telemetría de agentes (Frente C) — local, sin nube
+
+Un panel en tu propia máquina con **todas** las sesiones de Claude Code (terminales, bots, `claude -p`, subagentes) y de Codex, en vivo: qué se está procesando, qué te espera, qué falló, tokens y costo estimado. Sin API, sin cuenta nueva.
+
+![Pestaña Ahora del panel de telemetría (interfaz en portugués)](guia/assets/telemetria-agora.jpg)
+
+```bash
+./help.sh                          # ayuda completa
+./help.sh ligar                    # hooks + OpenTelemetry en ~/.claude/settings.json (con copia), panel y mantenimiento
+telemetria/telemetria.sh status    # qué está activo ahora
+./help.sh desligar                 # quita todo del settings.json y detiene los servicios (la base se conserva)
+systemctl --user stop telemetria-painel.service   # solo pausar el panel
+```
+
+- **Panel:** `http://127.0.0.1:8766/` y, en la red local, `http://<ip-de-la-maquina>:8766/` (direcciones en `TELEMETRIA_HOSTS`, redes permitidas en `TELEMETRIA_REDES`). Pestañas: Ahora, Procesos, Consumo, Fallas, Uso, Historial, Salud.
+- **Qué se guarda:** solo nombres (proyecto, herramienta, skill, programa) y números. Nunca prompts, respuestas, comandos completos, rutas de archivo ni salida de herramientas. Base en `~/.local/share/telemetria-agentes/` (30 días de eventos + resumen diario).
+- **Costo de máquina (medido):** ~60 ms más por llamada de herramienta, ~13 MB de RAM, 3–5 MB de disco por día (tope ~150 MB). Nada sale de la máquina.
+- **Límites:** tokens y costo solo en sesiones de Claude Code abiertas después de activarla; el costo es una estimación a precio de API (Codex no informa precio); el panel no tiene contraseña — cualquier dispositivo de la red permitida lo ve. Probado en Linux.
+- Detalles, pruebas y fases: [`telemetria/PLANO.md`](telemetria/PLANO.md) (en portugués).
+
 ## Requisitos previos
 
 - Plan de pago de Claude: Pro, Max, Team o Enterprise (función en beta, cuenta en el uso del plan).
@@ -77,6 +97,8 @@ Si no llega nada al recolector: `claude --debug-file /tmp/cc.log` y busca línea
 
 ```
 PLANO.md                               plan por fases (Frente A negocio, Frente B Claude Code)
+telemetria/                            Frente C: telemetría local de agentes (Claude Code + Codex)
+help.sh                                ayuda + activar/desactivar telemetría
 prompts/01-dashboard-negocio.md        panel a partir de una app
 prompts/02-conferir-numero.md          checklist para verificar un número
 prompts/03-base-central.md             base central en Supabase
@@ -89,7 +111,7 @@ guia/                                  página landing + guía (PT, EN, ES)
 
 ## Estado
 
-Plan + kit de prompts. El panel de Claude Code aún no se ha armado de punta a punta a partir de este kit; trata la primera ejecución como piloto y verifica cada paso antes de dar el OK a Claude.
+La **telemetría de agentes (Frente C)** ya está implementada y probada en Linux (`telemetria/`). Plan + kit de prompts. El panel de Claude Code aún no se ha armado de punta a punta a partir de este kit; trata la primera ejecución como piloto y verifica cada paso antes de dar el OK a Claude.
 
 ---
 

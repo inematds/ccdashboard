@@ -116,6 +116,7 @@
     <a class="sec" href="#fluxo">How it works</a>
     <a class="sec" href="#guia">User guide</a>
     <a class="sec" href="#exemplos">Examples</a>
+    <a class="sec" href="#telemetria">Telemetry</a>
     <a class="sec" href="#roadmap">Plan</a>
     <span class="lang"><a href="../">PT</a><a class="on" href="./">EN</a><a href="../es/">ES</a></span>
     <button class="tgl" id="themeToggle" aria-label="Toggle theme" title="Toggle theme">🌙</button>
@@ -271,6 +272,46 @@ Definitions: [balance = total − paid; empty paid = 0].
     <div class="card"><h3>🧠 Cache that doesn't hit</h3><p>Cache tokens read versus created per day — a cache being rebuilt all the time shows up here.</p></div>
     <div class="card"><h3>🧩 Cost per skill</h3><p>Usage and estimated cost per skill and per subagent type, to know what is worth keeping.</p></div>
   </div>
+</div></section>
+
+<section id="telemetria"><div class="wrap">
+  <span class="chip">Track C · agent telemetry</span>
+  <h2>See live everything your agents are doing</h2>
+  <p class="sub">A dashboard on your own machine with every Claude Code and Codex session: what is running, what is waiting for you, what failed, tokens and estimated cost. No cloud, no API, no new account.</p>
+  <div class="grid g3">
+    <div class="card"><h3>📡 Now</h3><p>Each session tagged as processing, waiting for you, asking permission or stalled, with the last tool and the command running.</p></div>
+    <div class="card"><h3>💸 Usage</h3><p>Input, output and cache tokens by model, project and day. Estimated cost at API prices for Claude Code; Codex does not report prices.</p></div>
+    <div class="card"><h3>🧯 Failures and usage</h3><p>Failure rate per tool and MCP server, long-running jobs, most used skills and subagents, 30-day history.</p></div>
+  </div>
+  <div class="ex" style="margin-top:22px">
+    <figure><img src="../assets/telemetria-agora.jpg" alt="Now tab (interface in Portuguese): Claude Code sessions (terminal, headless) and Codex sessions (exec, cli) side by side." loading="lazy"><figcaption>Now tab (interface in Portuguese): Claude Code sessions (terminal, headless) and Codex sessions (exec, cli) side by side.</figcaption></figure>
+    <figure><img src="../assets/telemetria-consumo.jpg" alt="Usage tab (interface in Portuguese): tokens and estimated cost by source, model and project." loading="lazy"><figcaption>Usage tab (interface in Portuguese): tokens and estimated cost by source, model and project.</figcaption></figure>
+  </div>
+  <div class="step" style="margin-top:22px"><div class="b">1</div><div>
+    <h3>Turn it on</h3>
+    <p>Installs the hooks and OpenTelemetry in <code>~/.claude/settings.json</code> (with a backup), the dashboard and the hourly maintenance.</p>
+<pre><span class="k">./help.sh</span>               <span class="c"># full help</span>
+<span class="k">./help.sh ligar</span>         <span class="c"># turn everything on</span></pre>
+  </div></div>
+  <div class="step"><div class="b">2</div><div>
+    <h3>Open the dashboard</h3>
+    <p>On this machine or from another device on the local network. It only answers the network allowed in <code>TELEMETRIA_REDES</code>.</p>
+<pre><span class="s">http://127.0.0.1:8766/</span>
+<span class="s">http://192.168.2.99:8766/</span>   <span class="c"># on the network: use your machine IP</span></pre>
+  </div></div>
+  <div class="step"><div class="b">3</div><div>
+    <h3>Check, pause or turn off</h3>
+    <p>Turning off removes everything from <code>settings.json</code> and stops the services; the database is kept.</p>
+<pre><span class="k">telemetria/telemetria.sh status</span>                  <span class="c"># what is on</span>
+<span class="k">./help.sh desligar</span>                               <span class="c"># turn off (database is kept)</span>
+<span class="k">systemctl --user stop telemetria-painel.service</span>  <span class="c"># just pause the dashboard</span></pre>
+  </div></div>
+  <div class="grid g3" style="margin-top:22px">
+    <div class="card"><h3>🔒 What is stored</h3><p>Only names (project, tool, skill, program) and numbers. Never prompt text, responses, full commands, file paths or tool output. The database lives in <code>~/.local/share/telemetria-agentes/</code> and keeps 30 days of events.</p></div>
+    <div class="card"><h3>⚙️ Machine cost (measured)</h3><p>~60 ms extra per tool call, ~13 MB of RAM for the service, 3–5 MB of disk per day (cap ~150 MB with the 30-day cleanup). Nothing leaves the machine.</p></div>
+    <div class="card"><h3>⚠️ Limits</h3><p>Tokens and cost only show up for Claude Code sessions opened after turning it on. The dashboard has no password: any device on the allowed network sees project names and numbers. Tested on Linux.</p></div>
+  </div>
+  <p class="sub" style="margin-top:16px">Details, tests and phases in <code>telemetria/PLANO.md</code> (in Portuguese).</p>
 </div></section>
 
 <section id="limites"><div class="wrap">

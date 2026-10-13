@@ -116,6 +116,7 @@
     <a class="sec" href="#fluxo">Cómo funciona</a>
     <a class="sec" href="#guia">Guía de uso</a>
     <a class="sec" href="#exemplos">Ejemplos</a>
+    <a class="sec" href="#telemetria">Telemetría</a>
     <a class="sec" href="#roadmap">Plan</a>
     <span class="lang"><a href="../">PT</a><a href="../en/">EN</a><a class="on" href="./">ES</a></span>
     <button class="tgl" id="themeToggle" aria-label="Alternar tema" title="Alternar tema">🌙</button>
@@ -271,6 +272,46 @@ Definiciones: [saldo = total − pagado; pagado vacío = 0].
     <div class="card"><h3>🧠 Caché que no pega</h3><p>Tokens de caché leídos frente a creados por día — un caché que se reconstruye a cada rato aparece aquí.</p></div>
     <div class="card"><h3>🧩 Costo por skill</h3><p>Uso y costo estimado por skill y por tipo de subagente, para saber qué vale la pena mantener.</p></div>
   </div>
+</div></section>
+
+<section id="telemetria"><div class="wrap">
+  <span class="chip">Frente C · telemetría de agentes</span>
+  <h2>Ve en vivo todo lo que hacen tus agentes</h2>
+  <p class="sub">Un panel en tu propia máquina con todas las sesiones de Claude Code y de Codex: qué se está procesando, qué te espera, qué falló, tokens y costo estimado. Sin nube, sin API, sin cuenta nueva.</p>
+  <div class="grid g3">
+    <div class="card"><h3>📡 Ahora</h3><p>Cada sesión con la etiqueta procesando, esperándote, pide permiso o detenida, la última herramienta y el comando en ejecución.</p></div>
+    <div class="card"><h3>💸 Consumo</h3><p>Tokens de entrada, salida y caché por modelo, proyecto y día. Costo estimado a precio de API para Claude Code; Codex no informa precio.</p></div>
+    <div class="card"><h3>🧯 Fallas y uso</h3><p>Tasa de falla por herramienta y servidor MCP, procesos largos, skills y subagentes más usados, historial de 30 días.</p></div>
+  </div>
+  <div class="ex" style="margin-top:22px">
+    <figure><img src="../assets/telemetria-agora.jpg" alt="Pestaña Ahora (interfaz en portugués): sesiones de Claude Code (terminal, headless) y de Codex (exec, cli) lado a lado." loading="lazy"><figcaption>Pestaña Ahora (interfaz en portugués): sesiones de Claude Code (terminal, headless) y de Codex (exec, cli) lado a lado.</figcaption></figure>
+    <figure><img src="../assets/telemetria-consumo.jpg" alt="Pestaña Consumo (interfaz en portugués): tokens y costo estimado por fuente, modelo y proyecto." loading="lazy"><figcaption>Pestaña Consumo (interfaz en portugués): tokens y costo estimado por fuente, modelo y proyecto.</figcaption></figure>
+  </div>
+  <div class="step" style="margin-top:22px"><div class="b">1</div><div>
+    <h3>Actívala</h3>
+    <p>Instala los hooks y OpenTelemetry en <code>~/.claude/settings.json</code> (con copia de seguridad), el panel y el mantenimiento cada hora.</p>
+<pre><span class="k">./help.sh</span>               <span class="c"># ayuda completa</span>
+<span class="k">./help.sh ligar</span>         <span class="c"># activa todo</span></pre>
+  </div></div>
+  <div class="step"><div class="b">2</div><div>
+    <h3>Abre el panel</h3>
+    <p>En esta máquina o desde otro dispositivo de la red local. Solo responde a la red permitida en <code>TELEMETRIA_REDES</code>.</p>
+<pre><span class="s">http://127.0.0.1:8766/</span>
+<span class="s">http://192.168.2.99:8766/</span>   <span class="c"># en la red: usa la IP de tu máquina</span></pre>
+  </div></div>
+  <div class="step"><div class="b">3</div><div>
+    <h3>Revisa, pausa o desactiva</h3>
+    <p>Desactivar quita todo del <code>settings.json</code> y detiene los servicios; la base de datos se conserva.</p>
+<pre><span class="k">telemetria/telemetria.sh status</span>                  <span class="c"># qué está activo</span>
+<span class="k">./help.sh desligar</span>                               <span class="c"># desactiva (la base se conserva)</span>
+<span class="k">systemctl --user stop telemetria-painel.service</span>  <span class="c"># solo pausar el panel</span></pre>
+  </div></div>
+  <div class="grid g3" style="margin-top:22px">
+    <div class="card"><h3>🔒 Qué se guarda</h3><p>Solo nombres (proyecto, herramienta, skill, programa) y números. Nunca texto del prompt, respuestas, comandos completos, rutas de archivo ni salida de herramientas. La base está en <code>~/.local/share/telemetria-agentes/</code> y guarda 30 días de eventos.</p></div>
+    <div class="card"><h3>⚙️ Costo de máquina (medido)</h3><p>~60 ms más por llamada de herramienta, ~13 MB de RAM en el servicio, 3–5 MB de disco por día (tope ~150 MB con la limpieza de 30 días). Nada sale de la máquina.</p></div>
+    <div class="card"><h3>⚠️ Límites</h3><p>Tokens y costo solo aparecen en sesiones de Claude Code abiertas después de activarla. El panel no tiene contraseña: cualquier dispositivo de la red permitida ve nombres de proyectos y números. Probado en Linux.</p></div>
+  </div>
+  <p class="sub" style="margin-top:16px">Detalles, pruebas y fases en <code>telemetria/PLANO.md</code> (en portugués).</p>
 </div></section>
 
 <section id="limites"><div class="wrap">
