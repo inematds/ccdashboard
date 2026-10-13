@@ -75,6 +75,7 @@ Se nada chegar no coletor: `claude --debug-file /tmp/cc.log` e procure linhas `[
 
 ```
 PLANO.md                               plano por fases (Frente A negócio, Frente B Claude Code)
+telemetria/PLANO.md                    Frente C: telemetria local de agentes (Claude Code + Codex)
 prompts/01-dashboard-negocio.md        painel a partir de um app
 prompts/02-conferir-numero.md          checklist para conferir um número
 prompts/03-base-central.md             base central no Supabase

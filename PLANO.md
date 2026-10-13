@@ -4,6 +4,7 @@ Plano para montar um sistema que qualquer pessoa consiga usar para ter **painéi
 
 - **Frente A — Negócio:** onde está o dinheiro, o que está atrasado, onde há vazamento.
 - **Frente B — Observabilidade do Claude Code:** o que o Claude Code está fazendo, o que falha e quanto custaria em preço de API.
+- **Frente C — Telemetria de agentes (local):** painel na própria máquina com todas as sessões do Claude Code e do Codex ao vivo, sem nuvem. Plano em [`telemetria/PLANO.md`](telemetria/PLANO.md).
 
 Status: **plano + kit de prompts**. Nada aqui cria projeto, função ou tabela sozinho; cada fase diz o que a pessoa faz e o que pede ao Claude.
 
