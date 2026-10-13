@@ -1,4 +1,2 @@
-doc/
-*.zip
-.env
-node_modules/
+__pycache__/
+*.pyc
