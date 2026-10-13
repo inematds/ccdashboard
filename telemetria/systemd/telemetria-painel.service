@@ -1,0 +1,11 @@
+[Unit]
+Description=Painel local da telemetria de agentes (127.0.0.1:8766)
+
+[Service]
+ExecStart=/usr/bin/python3 @AQUI@/painel/servidor.py
+Restart=on-failure
+RestartSec=5
+MemoryMax=256M
+
+[Install]
+WantedBy=default.target

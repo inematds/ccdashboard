@@ -1,0 +1,8 @@
+[Unit]
+Description=Manutenção do banco da telemetria de agentes
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 @AQUI@/manutencao.py
+TimeoutStartSec=120
+MemoryMax=256M

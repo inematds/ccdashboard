@@ -3,7 +3,22 @@
 Painel **local** que mostra, ao vivo, tudo o que os agentes estão fazendo na máquina: cada sessão do
 Claude Code (terminais, bots, `claude -p`, loops longos, subagentes) e do Codex CLI.
 
-Status: **plano**. Nada instalado ainda.
+Status (13/10/2026): **T0–T3 prontas e instaladas** nesta máquina. T4–T8 ainda são plano.
+
+| Peça | Arquivo |
+|---|---|
+| Coletor por hook | `hook/registra.py` |
+| Instalar / remover | `instalar.sh` / `desinstalar.sh` (via `ajusta_hooks.py`, com backup do `settings.json`) |
+| Manutenção (resumo, limpeza 30 dias, WAL) | `manutencao.py` + `systemd/telemetria-manutencao.timer` (de hora em hora) |
+| Painel | `painel/servidor.py` + `painel/painel.html` → **http://127.0.0.1:8766/** (serviço `telemetria-painel`) |
+| Banco | `~/.local/share/telemetria-agentes/eventos.db` (fora do repo) |
+
+**Resultado da T0:** ~3–5 mil chamadas de ferramenta por dia (pico 5,2 mil em 10/10) → ~10 mil eventos/dia,
+cerca de 2 MB/dia, ~60 MB em 30 dias. O Claude Code 2.1.296 entrega os eventos `SessionStart`, `SessionEnd`,
+`UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PermissionRequest`, `Notification`,
+`Stop`, `SubagentStart`, `SubagentStop`, `PreCompact` e `PostCompact`, com `agent_id`/`agent_type` nos de subagente.
+**Sessões já abertas passam a registrar no evento seguinte** (o Claude Code relê os hooks); as que estão
+paradas aparecem no contador "abertas sem sinal ainda" até fazerem algo.
 
 **Regra de ouro:** tudo fica na máquina. Sem nuvem, sem API, sem conta nova. Guarda **nomes e números**,
 nunca o texto de prompt, resposta, comando completo ou conteúdo de arquivo.
@@ -32,7 +47,7 @@ Codex CLI ── sessões no disco (~/.codex/sessions) ─────┤
                                                        ▼
                          ~/.local/share/telemetria-agentes/eventos.db  (SQLite, modo WAL)
                                                        │
-                                     servidor local 127.0.0.1:8765
+                                     servidor local 127.0.0.1:8766
                                                        │
                                      painel HTML (atualiza a cada 5 s)
 ```
@@ -127,7 +142,7 @@ texto de erro, e-mail, tokens/chaves.
 | T1 | hook com banco travado (`flock` no arquivo) → a sessão segue normal, evento descartado, sem atraso > 2 s |
 | T1 | `grep` no banco por um trecho de prompt digitado no teste → **zero** ocorrências |
 | T1 | `desinstalar.sh` → `settings.json` igual ao backup, hooks antigos intactos |
-| T3 | `curl -s 127.0.0.1:8765/api/agora` lista as sessões ativas; contagem bate com `pgrep` (±1) |
+| T3 | `curl -s 127.0.0.1:8766/api/agora` lista as sessões ativas; contagem bate com `pgrep` (±1) |
 | T3 | o painel não abre por outro IP da rede |
 | T4 | sessão nova → aparecem tokens e modelo no painel em até 60 s |
 | T5 | uma execução `codex exec` aparece na aba **Agora** / **Histórico** |
@@ -143,3 +158,18 @@ texto de erro, e-mail, tokens/chaves.
 
 ## 6. Ordem sugerida
 T0 → T1 → T2 → T3 (uma tarde, já entrega o painel "Agora") · T4 · T5 · depois T6–T8 conforme a necessidade.
+
+## 7. Verificação feita em 13/10/2026 (T1–T3)
+
+| Critério | Resultado |
+|---|---|
+| Sessão nova `claude -p` com um `ls` | registrou `SessionStart` (origem `headless`) → `UserPromptSubmit` → `PreToolUse`/`PostToolUse` `Bash ls` 54 ms → `Stop` → `SessionEnd` |
+| Frase-sentinela no prompt, no comando, no erro e na saída | **0** ocorrências no banco |
+| Banco travado por outro processo | hook saiu com 0 em 316 ms, evento descartado, sessão seguiu |
+| Velocidade do hook | 29 ms por evento (média de 100) |
+| `instalar.sh` + `desinstalar.sh` numa cópia do `settings.json` | volta idêntica ao original; os hooks antigos ficam intactos |
+| `/api/*` (6 rotas) e página | 200; contagem bate com os processos (`ativas` + `abertas sem sinal` = processos `claude`) |
+| Acesso por outro IP da rede | recusado (só escuta em 127.0.0.1) |
+| Largura de celular (380 px) | sem rolagem horizontal |
+
+Ajuste feito: a porta 8765 já era usada por outro serviço local; o painel ficou na **8766**.

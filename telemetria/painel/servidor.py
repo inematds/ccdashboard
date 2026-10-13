@@ -1,0 +1,261 @@
+#!/usr/bin/env python3
+"""Painel local da telemetria de agentes. Escuta só em 127.0.0.1.
+
+Lê o SQLite em modo somente leitura e entrega a página (painel.html) e as
+rotas /api/agora, /api/processamentos, /api/falhas, /api/uso, /api/historico
+e /api/saude.
+"""
+import json
+import os
+import sqlite3
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+DB = os.environ.get(
+    "TELEMETRIA_DB",
+    os.path.expanduser("~/.local/share/telemetria-agentes/eventos.db"),
+)
+PORTA = int(os.environ.get("TELEMETRIA_PORTA", "8766"))
+PARADA_MIN = int(os.environ.get("TELEMETRIA_PARADA_MIN", "10"))
+SETTINGS = os.path.expanduser("~/.claude/settings.json")
+PAGINA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "painel.html")
+HOOK = "telemetria/hook/registra.py"
+
+
+def conectar():
+    con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=2)
+    con.row_factory = sqlite3.Row
+    return con
+
+
+def linhas(con, sql, args=()):
+    return [dict(r) for r in con.execute(sql, args).fetchall()]
+
+
+def processo_vivo(pid):
+    if not pid:
+        return None
+    try:
+        exe = os.path.realpath(f"/proc/{pid}/exe")
+    except OSError:
+        return False
+    return os.path.exists(f"/proc/{pid}") and ("claude" in exe or "node" in exe)
+
+
+def pids_claude():
+    """Processos do Claude Code vivos na máquina (para contar os que ainda não deram sinal)."""
+    pids = set()
+    for nome in os.listdir("/proc"):
+        if nome.isdigit():
+            try:
+                if "/claude/versions/" in os.path.realpath(f"/proc/{nome}/exe"):
+                    pids.add(int(nome))
+            except OSError:
+                pass
+    return pids
+
+
+def inicio_do_dia():
+    t = time.localtime()
+    return time.mktime((t.tm_year, t.tm_mon, t.tm_mday, 0, 0, 0, 0, 0, -1))
+
+
+def api_agora(con):
+    agora = time.time()
+    sessoes = linhas(
+        con,
+        "SELECT * FROM sessoes WHERE estado!='encerrada' AND ultimo_ts > ? ORDER BY ultimo_ts DESC",
+        (agora - 3 * 86400,),
+    )
+    pend = linhas(con, "SELECT * FROM pendentes ORDER BY ts")
+    subag = linhas(
+        con,
+        "SELECT sessao, COUNT(DISTINCT agente) n FROM eventos WHERE agente IS NOT NULL AND ts > ? GROUP BY sessao",
+        (agora - 300,),
+    )
+    sub_por = {r["sessao"]: r["n"] for r in subag}
+    saida = []
+    for s in sessoes:
+        vivo = processo_vivo(s["pid"])
+        if vivo is False:
+            continue  # fechada sem SessionEnd
+        rodando = [p for p in pend if p["sessao"] == s["sessao"]]
+        parada_ha = agora - s["ultimo_ts"]
+        if s["estado"] == "esperando":
+            selo = "pede permissão" if s["ultimo_evento"] in ("PermissionRequest", "Notification") else "esperando você"
+        elif rodando:
+            selo = "processando"
+        elif parada_ha > PARADA_MIN * 60:
+            selo = "parada"
+        else:
+            selo = "processando"
+        if vivo is None and parada_ha > 3600:
+            continue  # sem pid conhecido e sem sinal há 1 h
+        saida.append({
+            "sessao": s["sessao"][:8],
+            "projeto": s["projeto"],
+            "origem": s["origem"] or "?",
+            "modelo": s["modelo"],
+            "selo": selo,
+            "desde_s": int(agora - s["inicio"]),
+            "ultimo_s": int(parada_ha),
+            "ultima": s["ultima_ferramenta"],
+            "rodando": [{"o_que": p["programa"] or p["ferramenta"], "ha_s": int(agora - p["ts"]),
+                         "subagente": bool(p["agente"])} for p in rodando],
+            "subagentes": sub_por.get(s["sessao"], 0),
+        })
+    conhecidos = {s["pid"] for s in sessoes if s["pid"]}
+    sem_sinal = len(pids_claude() - conhecidos)
+    contagem = {}
+    for s in saida:
+        contagem[s["selo"]] = contagem.get(s["selo"], 0) + 1
+    return {"sessoes": saida, "contagem": contagem, "total": len(saida), "sem_sinal": sem_sinal}
+
+
+def api_processamentos(con):
+    agora = time.time()
+    rodando = linhas(
+        con,
+        "SELECT p.ts, p.ferramenta, p.programa, p.projeto, p.agente FROM pendentes p ORDER BY p.ts",
+    )
+    for r in rodando:
+        r["ha_s"] = int(agora - r.pop("ts"))
+    longos = linhas(
+        con,
+        "SELECT ts, projeto, ferramenta, programa, duracao_ms, status, erro_tipo FROM eventos"
+        " WHERE evento IN ('PostToolUse','PostToolUseFailure') AND ts > ? AND duracao_ms >= 30000"
+        " ORDER BY ts DESC LIMIT 100",
+        (inicio_do_dia(),),
+    )
+    return {"rodando": rodando, "longos_hoje": longos}
+
+
+def api_falhas(con):
+    desde = inicio_do_dia()
+    por = linhas(
+        con,
+        "SELECT COALESCE(mcp, ferramenta) alvo, programa, erro_tipo, COUNT(*) n, MAX(ts) ultima FROM eventos"
+        " WHERE status='erro' AND ts > ? GROUP BY 1,2,3 ORDER BY n DESC LIMIT 50",
+        (desde,),
+    )
+    taxa = linhas(
+        con,
+        "SELECT COALESCE(mcp, ferramenta) alvo, COUNT(*) total, SUM(status='erro') erros,"
+        " ROUND(100.0*SUM(status='erro')/COUNT(*),1) taxa FROM eventos"
+        " WHERE evento IN ('PostToolUse','PostToolUseFailure') AND ts > ? GROUP BY 1"
+        " HAVING erros > 0 ORDER BY taxa DESC",
+        (desde,),
+    )
+    return {"por_alvo": por, "taxa": taxa}
+
+
+def api_uso(con):
+    desde = time.time() - 7 * 86400
+    base = "SELECT {c} nome, COUNT(*) n FROM eventos WHERE evento='PreToolUse' AND {c} IS NOT NULL AND ts > ? GROUP BY 1 ORDER BY n DESC LIMIT 25"
+    return {
+        "skills": linhas(con, base.format(c="skill"), (desde,)),
+        "mcps": linhas(con, base.format(c="mcp"), (desde,)),
+        "subagentes": linhas(
+            con,
+            "SELECT tipo_agente nome, COUNT(*) n FROM eventos WHERE evento='PreToolUse'"
+            " AND ferramenta IN ('Agent','Task') AND ts > ? GROUP BY 1 ORDER BY n DESC LIMIT 25",
+            (desde,),
+        ),
+        "ferramentas": linhas(con, base.format(c="ferramenta"), (desde,)),
+        "programas": linhas(con, base.format(c="programa"), (desde,)),
+        "projetos": linhas(con, base.format(c="projeto"), (desde,)),
+    }
+
+
+def api_historico(con):
+    desde = time.time() - 30 * 86400
+    dias = linhas(
+        con,
+        "SELECT date(ts,'unixepoch','localtime') dia,"
+        " COUNT(DISTINCT sessao) sessoes,"
+        " SUM(evento IN ('PostToolUse','PostToolUseFailure')) chamadas,"
+        " SUM(status='erro') falhas,"
+        " SUM(evento='UserPromptSubmit') pedidos"
+        " FROM eventos WHERE ts > ? GROUP BY 1 ORDER BY 1",
+        (desde,),
+    )
+    antigos = linhas(
+        con,
+        "SELECT dia, SUM(chamadas) chamadas, SUM(falhas) falhas FROM resumo_diario"
+        " WHERE dia < date('now','localtime','-30 day') GROUP BY dia ORDER BY dia",
+    )
+    return {"dias": dias, "resumo_antigo": antigos}
+
+
+def api_saude(con):
+    ultimo = con.execute("SELECT MAX(ts) FROM eventos").fetchone()[0]
+    por_hora = linhas(
+        con,
+        "SELECT strftime('%H',ts,'unixepoch','localtime') hora, COUNT(*) n FROM eventos WHERE ts > ? GROUP BY 1 ORDER BY 1",
+        (time.time() - 86400,),
+    )
+    instalados = []
+    try:
+        with open(SETTINGS) as f:
+            hooks = json.load(f).get("hooks", {})
+        for evento, grupos in hooks.items():
+            if any(HOOK in h.get("command", "") for g in grupos for h in g.get("hooks", [])):
+                instalados.append(evento)
+    except (OSError, ValueError):
+        pass
+    tam = lambda p: os.path.getsize(p) if os.path.exists(p) else 0
+    return {
+        "ultimo_evento_s": int(time.time() - ultimo) if ultimo else None,
+        "eventos": con.execute("SELECT COUNT(*) FROM eventos").fetchone()[0],
+        "sessoes": con.execute("SELECT COUNT(*) FROM sessoes").fetchone()[0],
+        "banco_mb": round((tam(DB) + tam(DB + "-wal")) / 1e6, 2),
+        "por_hora": por_hora,
+        "hooks_instalados": sorted(instalados),
+        "banco": DB,
+    }
+
+
+ROTAS = {
+    "/api/agora": api_agora,
+    "/api/processamentos": api_processamentos,
+    "/api/falhas": api_falhas,
+    "/api/uso": api_uso,
+    "/api/historico": api_historico,
+    "/api/saude": api_saude,
+}
+
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+
+    def responder(self, codigo, corpo, tipo):
+        self.send_response(codigo)
+        self.send_header("Content-Type", tipo)
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(corpo)
+
+    def do_GET(self):
+        caminho = self.path.split("?", 1)[0]
+        if caminho in ("/", "/index.html"):
+            with open(PAGINA, "rb") as f:
+                return self.responder(200, f.read(), "text/html; charset=utf-8")
+        if caminho in ROTAS:
+            if not os.path.exists(DB):
+                return self.responder(503, b'{"erro":"banco ainda nao existe"}', "application/json")
+            try:
+                con = conectar()
+                try:
+                    dados = ROTAS[caminho](con)
+                finally:
+                    con.close()
+                return self.responder(200, json.dumps(dados, ensure_ascii=False).encode(), "application/json")
+            except sqlite3.Error as e:
+                return self.responder(500, json.dumps({"erro": str(e)}).encode(), "application/json")
+        self.responder(404, b"nao encontrado", "text/plain")
+
+
+if __name__ == "__main__":
+    print(f"painel em http://127.0.0.1:{PORTA}/  banco: {DB}", flush=True)
+    ThreadingHTTPServer(("127.0.0.1", PORTA), Handler).serve_forever()
