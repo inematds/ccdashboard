@@ -279,6 +279,148 @@ def api_consumo(con):
     }
 
 
+HOME = os.path.expanduser("~")
+PROJETOS = os.path.join(HOME, "projetos") + "/"
+_rotinas_cache = [0, None]
+
+
+def projeto_do_texto(texto):
+    """Primeira pasta de ~/projetos citada no texto (ExecStart, WorkingDirectory, linha do cron)."""
+    if not texto or PROJETOS not in texto:
+        return None
+    return texto.split(PROJETOS, 1)[1].split("/", 1)[0].split()[0][:60] or None
+
+
+def sessao_do_texto(texto):
+    """Caminho de scratchpad de sessão do Claude (/tmp/claude-N/-home-...-projetos-X/<uuid>/) -> (projeto, título)."""
+    import re
+    m = re.search(r"/tmp/claude-\d+/-[^/]*?-projetos-([^/]+)/([0-9a-f]{8}-[0-9a-f-]{27})/", texto or "")
+    if not m:
+        return None, None
+    return m.group(1)[:60], titulo_da_sessao(m.group(2))
+
+
+def systemctl(*args):
+    import subprocess
+    r = subprocess.run(["systemctl", "--user", "--no-pager", *args], capture_output=True, text=True, timeout=10)
+    return r.stdout
+
+
+def propriedades(unidades, campos):
+    if not unidades:
+        return {}
+    saida, atual = {}, {}
+    for linha in (systemctl("show", "-p", ",".join(campos), *unidades) + "\n").splitlines():
+        if not linha.strip():
+            if atual.get("Id"):
+                saida[atual["Id"]] = atual
+            atual = {}
+            continue
+        k, _, v = linha.partition("=")
+        atual[k] = v
+    return saida
+
+
+def ts_systemd(valor):
+    """'Wed 2026-10-14 00:59:23 -03' -> epoch."""
+    try:
+        return time.mktime(time.strptime(" ".join(valor.split()[1:3]), "%Y-%m-%d %H:%M:%S"))
+    except (ValueError, IndexError):
+        return None
+
+
+def proximo_cron(expr, agora):
+    """Próxima execução para linhas 'm h * * dow' (o que existe no crontab). Outras formas: None."""
+    try:
+        m, h, dia, mes, dow = expr.split()[:5]
+        if dia != "*" or mes != "*" or not m.isdigit() or not h.isdigit():
+            return None
+        dias = None if dow == "*" else {int(x) % 7 for x in dow.split(",")}
+        t = time.localtime(agora)
+        for d in range(8):
+            base = time.mktime((t.tm_year, t.tm_mon, t.tm_mday + d, int(h), int(m), 0, 0, 0, -1))
+            semana = (time.localtime(base).tm_wday + 1) % 7  # cron: 0 = domingo
+            if base > agora and (dias is None or semana in dias):
+                return base
+    except (ValueError, IndexError):
+        pass
+    return None
+
+
+def api_rotinas(_con):
+    agora = time.time()
+    if _rotinas_cache[1] and agora - _rotinas_cache[0] < 10:
+        return _rotinas_cache[1]
+    # Serviços rodando que são nossos (unit em ~/.config/systemd/user ou transitória), não os do desktop.
+    rodando_ids = [json_u["unit"] for json_u in json.loads(
+        systemctl("list-units", "--type=service", "--state=running", "-o", "json") or "[]")]
+    props = propriedades(rodando_ids, ["Id", "Description", "FragmentPath", "ExecStart", "WorkingDirectory",
+                                       "ActiveEnterTimestamp", "MainPID"])
+    rodando = []
+    for uid, p in props.items():
+        frag = p.get("FragmentPath", "")
+        if not (frag.startswith(os.path.join(HOME, ".config/systemd/user")) or frag.startswith("/run/user/")):
+            continue
+        cmd = p.get("ExecStart", "")
+        argv = cmd.split("argv[]=", 1)[1].split(" ; ", 1)[0] if "argv[]=" in cmd else cmd
+        inicio = ts_systemd(p.get("ActiveEnterTimestamp", ""))
+        proj_sessao, titulo = sessao_do_texto(argv)
+        rodando.append({
+            "unidade": uid.removesuffix(".service"),
+            "o_que": p.get("Description", "")[:160],
+            "comando": argv.replace(HOME, "~")[:200],
+            "projeto": projeto_do_texto(p.get("WorkingDirectory", "")) or projeto_do_texto(argv) or proj_sessao,
+            "sessao_titulo": titulo,
+            "run": frag.startswith("/run/user/"),
+            "desde": inicio,
+            "ha_s": int(agora - inicio) if inicio else None,
+        })
+    rodando.sort(key=lambda r: -(r["desde"] or 0))
+    # Timers do systemd.
+    timers = json.loads(systemctl("list-timers", "--all", "-o", "json") or "[]")
+    tprops = propriedades([t["activates"] for t in timers if t.get("activates")],
+                          ["Id", "Description", "ExecStart", "WorkingDirectory", "ActiveState", "FragmentPath"])
+    agendados = []
+    for t in timers:
+        sp = tprops.get(t.get("activates"), {})
+        if sp.get("FragmentPath", "").startswith("/usr/") or t["unit"].startswith("snap."):
+            continue
+        nxt = t["next"] / 1e6 if t.get("next") else None
+        ult = t["last"] / 1e6 if t.get("last") else None
+        agendados.append({
+            "unidade": t["unit"].removesuffix(".timer"),
+            "o_que": sp.get("Description", "")[:140],
+            "projeto": projeto_do_texto(sp.get("WorkingDirectory", "")) or projeto_do_texto(sp.get("ExecStart", "")),
+            "proxima": nxt, "ultima": ult,
+            "rodando_agora": sp.get("ActiveState") == "activating" or sp.get("ActiveState") == "active",
+            "fonte": "systemd",
+        })
+    # Crontab.
+    import subprocess
+    cron = subprocess.run(["crontab", "-l"], capture_output=True, text=True, timeout=5).stdout
+    for linha in cron.splitlines():
+        linha = linha.strip()
+        if not linha or linha.startswith("#") or "=" in linha.split()[0]:
+            continue
+        partes = linha.split(None, 5)
+        if len(partes) < 6:
+            continue
+        expr, comando = " ".join(partes[:5]), partes[5]
+        script = next((os.path.basename(w) for w in comando.split()
+                       if "/" in w and w.endswith((".sh", ".py", ".mjs", ".js"))), None)
+        agendados.append({
+            "unidade": script or comando.split()[0][-40:],
+            "o_que": "cron " + expr,
+            "projeto": projeto_do_texto(comando),
+            "proxima": proximo_cron(expr, agora), "ultima": None,
+            "rodando_agora": False, "fonte": "cron",
+        })
+    agendados.sort(key=lambda r: r["proxima"] or 9e12)
+    resultado = {"rodando": rodando, "agendados": agendados, "agora": agora}
+    _rotinas_cache[:] = [agora, resultado]
+    return resultado
+
+
 ROTAS = {
     "/api/consumo": api_consumo,
     "/api/agora": api_agora,
@@ -287,6 +429,7 @@ ROTAS = {
     "/api/uso": api_uso,
     "/api/historico": api_historico,
     "/api/saude": api_saude,
+    "/api/rotinas": api_rotinas,
 }
 
 
