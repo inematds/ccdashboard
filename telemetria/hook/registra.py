@@ -53,7 +53,8 @@ CREATE TABLE IF NOT EXISTS sessoes (
   modelo TEXT,
   pid INTEGER,
   estado TEXT,
-  fim REAL
+  fim REAL,
+  repo TEXT
 );
 CREATE TABLE IF NOT EXISTS pendentes (
   tool_use_id TEXT PRIMARY KEY,
@@ -191,6 +192,32 @@ def origem_da_sessao(pid, cmd):
     return "outro"
 
 
+def repo_do_caminho(caminho):
+    """Nome do repo git que contém o caminho (só o nome da pasta-raiz, nunca o caminho)."""
+    if not isinstance(caminho, str) or not caminho.startswith("/"):
+        return None
+    d = os.path.normpath(caminho)
+    if not os.path.isdir(d):
+        d = os.path.dirname(d)
+    for _ in range(12):
+        if d in ("/", "") or d == os.path.expanduser("~"):
+            return None
+        if os.path.exists(os.path.join(d, ".git")):
+            return os.path.basename(d)[:60]
+        d = os.path.dirname(d)
+    return None
+
+
+def cd_do_bash(comando):
+    """Destino do primeiro `cd` absoluto do comando (cd /x/y && ...)."""
+    if not isinstance(comando, str):
+        return None
+    palavras = comando.strip().split()
+    if len(palavras) > 1 and palavras[0] == "cd":
+        return os.path.expanduser(palavras[1].strip("\"'"))
+    return None
+
+
 def principal():
     dados = json.loads(sys.stdin.read() or "{}")
     evento = curto(dados.get("hook_event_name"), 40) or "desconhecido"
@@ -213,6 +240,12 @@ def principal():
         tipo_agente = tipo_agente or curto(entrada.get("subagent_type"), 60) or "general-purpose"
     if ferramenta == "Bash":
         programa = programa_do_bash(entrada.get("command"))
+    repo = None
+    if evento == "PreToolUse":
+        alvo = entrada.get("file_path") or entrada.get("notebook_path") or entrada.get("path")
+        if ferramenta == "Bash":
+            alvo = cd_do_bash(entrada.get("command"))
+        repo = repo_do_caminho(alvo)
     tool_use_id = curto(dados.get("tool_use_id"), 80)
 
     status = erro_tipo = detalhe = None
@@ -234,6 +267,8 @@ def principal():
         con.execute("PRAGMA journal_mode=WAL")
         con.executescript(SCHEMA)
     con.execute("PRAGMA synchronous=NORMAL")
+    if not novo and "repo" not in {r[1] for r in con.execute("PRAGMA table_info(sessoes)")}:
+        con.execute("ALTER TABLE sessoes ADD COLUMN repo TEXT")
     con.execute("BEGIN IMMEDIATE")
 
     duracao = None
@@ -293,6 +328,8 @@ def principal():
                 (agora, evento, estado, rotulo, projeto, modelo, pid,
                  origem, origem, origem, estado, agora, sessao),
             )
+        if repo:
+            con.execute("UPDATE sessoes SET repo=? WHERE sessao=?", (repo, sessao))
         if evento == "SessionEnd":
             con.execute("DELETE FROM pendentes WHERE sessao=?", (sessao,))
     con.execute("COMMIT")

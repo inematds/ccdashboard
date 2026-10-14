@@ -62,6 +62,43 @@ def pids_claude():
     return pids
 
 
+PROJETOS_CLAUDE = os.path.expanduser("~/.claude/projects")
+_titulos = {}  # sessao -> (caminho, tamanho lido, título)
+
+
+def titulo_da_sessao(sessao):
+    """Título da sessão (o mesmo do /resume), lido na hora do transcript; nada vai para o banco."""
+    if not sessao:
+        return None
+    caminho, lido, titulo = _titulos.get(sessao, (None, 0, None))
+    if not caminho:
+        import glob
+        achados = glob.glob(os.path.join(PROJETOS_CLAUDE, "*", sessao + ".jsonl"))
+        if not achados:
+            return None
+        caminho = achados[0]
+    try:
+        tamanho = os.path.getsize(caminho)
+        if tamanho < lido:
+            lido = 0
+        with open(caminho, "rb") as f:
+            f.seek(lido)
+            for linha in f:
+                if b'"custom-title"' in linha or b'"ai-title"' in linha:
+                    try:
+                        d = json.loads(linha)
+                    except ValueError:
+                        continue
+                    t = d.get("customTitle") or d.get("aiTitle")
+                    if isinstance(t, str) and t.strip():
+                        if d.get("type") == "custom-title" or not titulo or not titulo[1]:
+                            titulo = (t.strip()[:90], d.get("type") == "custom-title")
+        _titulos[sessao] = (caminho, tamanho, titulo)
+    except OSError:
+        return None
+    return titulo[0] if titulo else None
+
+
 def inicio_do_dia():
     t = time.localtime()
     return time.mktime((t.tm_year, t.tm_mon, t.tm_mday, 0, 0, 0, 0, 0, -1))
@@ -101,6 +138,8 @@ def api_agora(con):
         saida.append({
             "sessao": s["sessao"][:8],
             "projeto": s["projeto"],
+            "repo": s["repo"] if "repo" in s.keys() else None,
+            "titulo": titulo_da_sessao(s["sessao"]),
             "origem": s["origem"] or "?",
             "modelo": s["modelo"],
             "selo": selo,
