@@ -606,6 +606,56 @@ def segundos_systemd(valor):
     return total or None
 
 
+DIAS_PT = {"Mon": "seg", "Tue": "ter", "Wed": "qua", "Thu": "qui", "Fri": "sex", "Sat": "sáb", "Sun": "dom"}
+
+
+def horario_legivel(spec):
+    """OnCalendar do systemd -> 'todo dia 05:30', 'seg–sex 08:00', 'dom 15:00', '15/10 10:05 (uma vez)'."""
+    import re
+    m = re.match(r"^(?:([A-Za-z.,]+)\s+)?(\S+)\s+([\d,]+):(\d\d)(?::\d\d)?$", spec.strip())
+    if not m:
+        return spec
+    dow, data, hs, mi = m.groups()
+    horas = ", ".join(f"{int(h):02d}:{mi}" for h in hs.split(","))
+    if dow:
+        dias = "–".join(DIAS_PT.get(d, d) for d in dow.split("..")) if ".." in dow else ", ".join(DIAS_PT.get(d, d) for d in dow.split(","))
+        return f"{dias} {horas}"
+    if data in ("*-*-*", "*-*-* "):
+        return f"todo dia {horas}"
+    md = re.match(r"\d{4}-(\d\d)-(\d\d)$", data)
+    return f"{md.group(2)}/{md.group(1)} {horas} (uma vez)" if md else f"{data} {horas}"
+
+
+def cron_legivel(expr):
+    """'30 8 * * *' -> 'todo dia 08:30'; '0 9 * * 1-5' -> 'seg–sex 09:00'."""
+    p = expr.split()
+    if len(p) != 5 or not p[0].isdigit() or not all(h.isdigit() for h in p[1].split(",")) or p[2] != "*" or p[3] != "*":
+        return "cron " + expr
+    horas = ", ".join(f"{int(h):02d}:{int(p[0]):02d}" for h in p[1].split(","))
+    nomes = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb", "dom"]
+    if p[4] == "*":
+        return f"todo dia {horas}"
+    if "-" in p[4]:
+        a, b = p[4].split("-")
+        return f"{nomes[int(a)]}–{nomes[int(b)]} {horas}"
+    return ", ".join(nomes[int(d)] for d in p[4].split(",")) + f" {horas}"
+
+
+def nome_curto(descr, projeto):
+    """'eventosextremospub — Clima do DIA (boletim...), diário…' -> 'Clima do DIA'."""
+    import re
+    d = descr
+    if projeto and d.lower().startswith(projeto.lower()):
+        d = d[len(projeto):].lstrip(" —-:")
+    return re.split(r"\s\(|,\s|:\s", d, maxsplit=1)[0].strip()[:60] or descr[:60]
+
+
+def chave_hora(texto):
+    import re
+    m = re.search(r"(\d\d):(\d\d)", texto)
+    return m.group(0) if m else "99"
+
+
 def api_agenda(_con):
     """Só o que tem execução prevista: cada disparo das próximas AGENDA_HORAS, em ordem de hora."""
     import re
@@ -614,10 +664,10 @@ def api_agenda(_con):
     if _agenda_cache[1] and agora - _agenda_cache[0] < 30:
         return _agenda_cache[1]
     limite = agora + AGENDA_HORAS * 3600
-    previstos, recorrentes = [], []
+    previstos, recorrentes, grade = [], [], []
     timers = json.loads(systemctl("list-timers", "--all", "-o", "json") or "[]")
     tprops = propriedades([t["activates"] for t in timers if t.get("activates")],
-                          ["Id", "Description", "ExecStart", "WorkingDirectory", "FragmentPath"])
+                          ["Id", "Description", "ExecStart", "WorkingDirectory", "FragmentPath", "ActiveState"])
     tcal = propriedades([t["unit"] for t in timers], ["Id", "TimersCalendar", "TimersMonotonic"])
     for t in timers:
         sp = tprops.get(t.get("activates"), {})
@@ -631,6 +681,12 @@ def api_agenda(_con):
         }
         tp = tcal.get(t["unit"], {})
         specs = [s.strip() for s in re.findall(r"OnCalendar=([^;]+?)\s;", tp.get("TimersCalendar", ""))]
+        if specs:
+            hl = "; ".join(horario_legivel(x) for x in specs)
+            grade.append({"projeto": item["projeto"], "unidade": item["unidade"], "horario": hl,
+                          "nome": nome_curto(item["o_que"], item["projeto"]), "parado": not t.get("next") and sp.get("ActiveState") != "activating",
+                          "rodando": sp.get("ActiveState") in ("activating", "active"),
+                          "proxima": t["next"] / 1e6 if t.get("next") else None})
         vezes = set()
         for spec in specs:
             vezes.update(proximas_calendario(spec, agora, limite))
@@ -667,6 +723,8 @@ def api_agenda(_con):
         item = {"unidade": script or comando.split()[0][-40:], "o_que": comando.replace(HOME, "~")[:140],
                 "projeto": projeto_do_texto(comando), "fonte": "cron", "regra": "cron " + expr}
         k = proximo_cron(expr, agora)
+        grade.append({"projeto": item["projeto"], "unidade": item["unidade"], "horario": cron_legivel(expr),
+                      "nome": item["unidade"], "parado": False, "proxima": k, "cron": True})
         if k is None:
             recorrentes.append({**item, "proxima": None, "intervalo_s": None})
         while k and k <= limite:
@@ -674,7 +732,8 @@ def api_agenda(_con):
             k = proximo_cron(expr, k)
     previstos.sort(key=lambda r: r["quando"])
     recorrentes.sort(key=lambda r: (r["intervalo_s"] or 9e9, r["unidade"]))
-    resultado = {"agora": agora, "horas": AGENDA_HORAS, "previstos": previstos, "recorrentes": recorrentes}
+    grade.sort(key=lambda r: ((r["projeto"] or "~").lower(), chave_hora(r["horario"]), r["unidade"]))
+    resultado = {"agora": agora, "horas": AGENDA_HORAS, "previstos": previstos, "recorrentes": recorrentes, "grade": grade}
     _agenda_cache[:] = [agora, resultado]
     return resultado
 
