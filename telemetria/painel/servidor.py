@@ -62,6 +62,41 @@ def pids_claude():
     return pids
 
 
+def comandos_em_fundo():
+    """pid do Claude -> comandos que ele deixou em segundo plano (run_in_background).
+
+    Assinatura: filho direto do processo do Claude com a saída indo para .../tasks/<id>.output.
+    """
+    import re
+    try:
+        with open("/proc/stat") as f:
+            btime = next(int(l.split()[1]) for l in f if l.startswith("btime"))
+        tick = os.sysconf("SC_CLK_TCK")
+    except (OSError, StopIteration, ValueError):
+        return {}
+    agora = time.time()
+    saida = {}
+    for nome in os.listdir("/proc"):
+        if not nome.isdigit():
+            continue
+        try:
+            saida_fd = os.readlink(f"/proc/{nome}/fd/1")
+            if "/tasks/" not in saida_fd or not saida_fd.endswith(".output"):
+                continue
+            with open(f"/proc/{nome}/stat") as f:
+                campos = f.read().rsplit(")", 1)[1].split()
+            ppid, inicio = int(campos[1]), btime + int(campos[19]) / tick
+            with open(f"/proc/{nome}/cmdline", "rb") as f:
+                cmd = f.read().replace(b"\0", b" ").decode(errors="replace")
+        except (OSError, ValueError, IndexError):
+            continue
+        m = re.search(r"eval '(.*?)' < /dev/null", cmd, re.S)
+        cmd = m.group(1) if m else cmd.split("eval '", 1)[-1]
+        cmd = cmd.replace("'\\''", "'").replace(HOME, "~").strip()
+        saida.setdefault(ppid, []).append({"o_que": cmd[:200], "ha_s": int(agora - inicio), "tipo": "comando"})
+    return saida
+
+
 PROJETOS_CLAUDE = os.path.expanduser("~/.claude/projects")
 _titulos = {}  # sessao -> (caminho, tamanho lido, título)
 
@@ -104,6 +139,29 @@ def inicio_do_dia():
     return time.mktime((t.tm_year, t.tm_mon, t.tm_mday, 0, 0, 0, 0, 0, -1))
 
 
+def trabalho_em_fundo(con, agora):
+    """O que cada sessão deixou trabalhando sozinho: comandos em segundo plano (por pid),
+    subagentes ainda sem SubagentStop e runs do systemd-run lançados da pasta da sessão (por sessão)."""
+    por_sessao = {}
+    ultimo = {}
+    for r in linhas(con, "SELECT sessao, agente, tipo_agente, evento, ts FROM eventos"
+                         " WHERE agente IS NOT NULL AND ts > ? ORDER BY ts", (agora - 3600,)):
+        a = ultimo.setdefault(r["agente"], {"sessao": r["sessao"], "tipo": None, "inicio": r["ts"]})
+        a.update(evento=r["evento"], ts=r["ts"], tipo=r["tipo_agente"] or a["tipo"])
+    for a in ultimo.values():
+        if a["evento"] != "SubagentStop" and agora - a["ts"] < 600:
+            por_sessao.setdefault(a["sessao"], []).append(
+                {"o_que": "subagente " + (a["tipo"] or ""), "ha_s": int(agora - a["inicio"]), "tipo": "subagente"})
+    try:
+        for r in api_rotinas(None)["rodando"]:
+            if r.get("run") and r.get("sessao_id"):
+                por_sessao.setdefault(r["sessao_id"], []).append(
+                    {"o_que": r["unidade"] + " · " + r["comando"], "ha_s": r["ha_s"], "tipo": "systemd-run"})
+    except Exception:
+        pass
+    return {"pid": comandos_em_fundo(), "sessao": por_sessao}
+
+
 def api_agora(con):
     agora = time.time()
     sessoes = linhas(
@@ -118,6 +176,7 @@ def api_agora(con):
         (agora - 300,),
     )
     sub_por = {r["sessao"]: r["n"] for r in subag}
+    fundo = trabalho_em_fundo(con, agora)
     saida = []
     for s in sessoes:
         vivo = processo_vivo(s["pid"])
@@ -125,8 +184,15 @@ def api_agora(con):
             continue  # fechada sem SessionEnd
         rodando = [p for p in pend if p["sessao"] == s["sessao"]]
         parada_ha = agora - s["ultimo_ts"]
-        if s["estado"] == "esperando":
-            selo = "pede permissão" if s["ultimo_evento"] == "PermissionRequest" else "esperando você"
+        cmds = sorted(fundo["pid"].get(s["pid"], []), key=lambda f: -f["ha_s"])
+        n_bash = sum(1 for p in rodando if p["ferramenta"] == "Bash")  # Bash em primeiro plano também cai em tasks/
+        em_fundo = cmds[:max(0, len(cmds) - n_bash)] + fundo["sessao"].get(s["sessao"], [])
+        if s["estado"] == "esperando" and s["ultimo_evento"] == "PermissionRequest":
+            selo = "pede permissão"
+        elif s["estado"] == "esperando" and em_fundo:
+            selo = "em segundo plano"
+        elif s["estado"] == "esperando":
+            selo = "esperando você"
         elif rodando:
             selo = "processando"
         elif parada_ha > PARADA_MIN * 60:
@@ -150,6 +216,7 @@ def api_agora(con):
             "rodando": [{"o_que": p["programa"] or p["ferramenta"], "ha_s": int(agora - p["ts"]),
                          "subagente": bool(p["agente"])} for p in rodando],
             "subagentes": sub_por.get(s["sessao"], 0),
+            "fundo": em_fundo,
         })
     conhecidos = {s["pid"] for s in sessoes if s["pid"]}
     sem_sinal = len(pids_claude() - conhecidos)
@@ -234,6 +301,8 @@ def api_sessao(con, sid=""):
         "subagentes": linhas(con, "SELECT tipo_agente nome, COUNT(*) n FROM eventos WHERE sessao=? AND evento='PreToolUse'"
                                   " AND ferramenta IN ('Agent','Task') GROUP BY 1 ORDER BY n DESC", (sid,)),
         "rodando": pend, "eventos": eventos, "erros": erros,
+        "fundo": (lambda f, n: sorted(f["pid"].get(s["pid"], []), key=lambda x: -x["ha_s"])[:max(0, len(f["pid"].get(s["pid"], [])) - n)]
+                  + f["sessao"].get(sid, []))(trabalho_em_fundo(con, agora), sum(1 for p in pend if p["ferramenta"] == "Bash")),
     }
 
 
@@ -444,7 +513,10 @@ def api_rotinas(_con):
         argv = cmd.split("argv[]=", 1)[1].split(" ; ", 1)[0] if "argv[]=" in cmd else cmd
         inicio = ts_systemd(p.get("ActiveEnterTimestamp", ""))
         proj_sessao, titulo = sessao_do_texto(argv)
+        import re
+        m_sid = re.search(r"/tmp/claude-\d+/[^/]+/([0-9a-f]{8}-[0-9a-f-]{27})/", argv)
         rodando.append({
+            "sessao_id": m_sid.group(1) if m_sid else None,
             "unidade": uid.removesuffix(".service"),
             "o_que": p.get("Description", "")[:160],
             "comando": argv.replace(HOME, "~")[:200],
