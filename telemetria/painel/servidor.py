@@ -136,6 +136,7 @@ def api_agora(con):
         if vivo is None and parada_ha > 3600:
             continue  # sem pid conhecido e sem sinal há 1 h
         saida.append({
+            "id": s["sessao"],
             "sessao": s["sessao"][:8],
             "projeto": s["projeto"],
             "repo": s["repo"] if "repo" in s.keys() else None,
@@ -156,6 +157,84 @@ def api_agora(con):
     for s in saida:
         contagem[s["selo"]] = contagem.get(s["selo"], 0) + 1
     return {"sessoes": saida, "contagem": contagem, "total": len(saida), "sem_sinal": sem_sinal}
+
+
+def info_processo(pid):
+    """cwd e linha de comando do processo da sessão, se ainda vivo."""
+    if not pid or not os.path.exists(f"/proc/{pid}"):
+        return None
+    info = {"pid": pid}
+    try:
+        info["cwd"] = os.readlink(f"/proc/{pid}/cwd").replace(HOME, "~")
+    except OSError:
+        pass
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            info["cmd"] = f.read().replace(b"\0", b" ").decode(errors="replace").strip()[:300]
+    except OSError:
+        pass
+    try:
+        with open(f"/proc/{pid}/status") as f:
+            for linha in f:
+                if linha.startswith("VmRSS:"):
+                    info["rss_mb"] = round(int(linha.split()[1]) / 1024)
+    except (OSError, ValueError):
+        pass
+    return info
+
+
+def api_sessao(con, sid=""):
+    """Tudo o que o banco sabe de uma sessão (id completo ou prefixo)."""
+    agora = time.time()
+    if not sid or len(sid) < 8:
+        return {"erro": "id da sessão ausente"}
+    s = con.execute("SELECT * FROM sessoes WHERE sessao LIKE ? ORDER BY ultimo_ts DESC LIMIT 1",
+                    (sid + "%",)).fetchone()
+    if not s:
+        return {"erro": "sessão não encontrada"}
+    s = dict(s)
+    sid = s["sessao"]
+    um = lambda sql, a=(): con.execute(sql, a).fetchone()
+    tot = dict(um(
+        "SELECT SUM(evento='UserPromptSubmit') pedidos,"
+        " SUM(evento IN ('PostToolUse','PostToolUseFailure')) chamadas,"
+        " SUM(status='erro') erros, SUM(COALESCE(duracao_ms,0)) duracao_ms,"
+        " COUNT(DISTINCT agente) subagentes, MIN(ts) primeiro, COUNT(*) eventos"
+        " FROM eventos WHERE sessao=?", (sid,)))
+    soma = ("SUM(COALESCE(entrada,0)) entrada, SUM(COALESCE(saida,0)) saida,"
+            " SUM(COALESCE(cache_leitura,0)) cache_leitura, SUM(COALESCE(cache_escrita,0)) cache_escrita,"
+            " ROUND(SUM(COALESCE(custo_usd,0)),2) custo_usd, COUNT(*) chamadas")
+    consumo = linhas(con, f"SELECT COALESCE(modelo,'?') modelo, {soma} FROM consumo WHERE sessao=?"
+                          " GROUP BY 1 ORDER BY custo_usd DESC, entrada DESC", (sid,))
+    ferr = linhas(con, "SELECT ferramenta nome, COUNT(*) n, SUM(status='erro') erros,"
+                       " ROUND(SUM(COALESCE(duracao_ms,0))/1000.0) seg FROM eventos"
+                       " WHERE sessao=? AND evento IN ('PostToolUse','PostToolUseFailure') AND ferramenta IS NOT NULL"
+                       " GROUP BY 1 ORDER BY n DESC LIMIT 20", (sid,))
+    base = ("SELECT {c} nome, COUNT(*) n FROM eventos WHERE sessao=? AND evento='PreToolUse'"
+            " AND {c} IS NOT NULL GROUP BY 1 ORDER BY n DESC LIMIT 15")
+    pend = linhas(con, "SELECT ts, ferramenta, programa, agente FROM pendentes WHERE sessao=? ORDER BY ts", (sid,))
+    for p in pend:
+        p["ha_s"] = int(agora - p.pop("ts"))
+    eventos = linhas(con, "SELECT ts, evento, ferramenta, programa, skill, mcp, tipo_agente, duracao_ms, status,"
+                          " erro_tipo, detalhe, agente FROM eventos WHERE sessao=? ORDER BY ts DESC LIMIT 60", (sid,))
+    erros = linhas(con, "SELECT ts, COALESCE(mcp, ferramenta) alvo, programa, erro_tipo FROM eventos"
+                        " WHERE sessao=? AND status='erro' ORDER BY ts DESC LIMIT 20", (sid,))
+    vivo = processo_vivo(s["pid"])
+    titulo_da_sessao(sid)
+    transcript = _titulos.get(sid, (None,))[0]
+    return {
+        "sessao": s, "titulo": titulo_da_sessao(sid), "agora": agora,
+        "vivo": vivo, "processo": info_processo(s["pid"]) if vivo else None,
+        "transcript": transcript.replace(HOME, "~") if transcript else None,
+        "transcript_mb": round(os.path.getsize(transcript) / 1e6, 1) if transcript and os.path.exists(transcript) else None,
+        "totais": tot, "consumo": consumo, "ferramentas": ferr,
+        "programas": linhas(con, base.format(c="programa"), (sid,)),
+        "skills": linhas(con, base.format(c="skill"), (sid,)),
+        "mcps": linhas(con, base.format(c="mcp"), (sid,)),
+        "subagentes": linhas(con, "SELECT tipo_agente nome, COUNT(*) n FROM eventos WHERE sessao=? AND evento='PreToolUse'"
+                                  " AND ferramenta IN ('Agent','Task') GROUP BY 1 ORDER BY n DESC", (sid,)),
+        "rodando": pend, "eventos": eventos, "erros": erros,
+    }
 
 
 def api_processamentos(con):
@@ -317,7 +396,7 @@ def propriedades(unidades, campos):
             atual = {}
             continue
         k, _, v = linha.partition("=")
-        atual[k] = v
+        atual[k] = atual[k] + "\n" + v if k in atual and k.startswith("Timers") else v
     return saida
 
 
@@ -421,7 +500,116 @@ def api_rotinas(_con):
     return resultado
 
 
+AGENDA_HORAS = 24
+_agenda_cache = [0, None]
+_calendario_cache = {}  # spec -> (ts, [epochs])
+
+
+def proximas_calendario(spec, agora, limite):
+    """Execuções de um OnCalendar até `limite`, pelo systemd-analyze (cache de 5 min por expressão)."""
+    import re
+    import subprocess
+    em_cache = _calendario_cache.get(spec)
+    if not em_cache or agora - em_cache[0] > 300:
+        r = subprocess.run(["systemd-analyze", "calendar", "--iterations=60", spec],
+                           capture_output=True, text=True, timeout=10)
+        lista = []
+        for d in re.findall(r"(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)", r.stdout):
+            try:
+                lista.append(time.mktime(time.strptime(d, "%Y-%m-%d %H:%M:%S")))
+            except ValueError:
+                pass
+        em_cache = (agora, sorted(set(lista)))
+        _calendario_cache[spec] = em_cache
+    return [t for t in em_cache[1] if agora < t <= limite]
+
+
+def segundos_systemd(valor):
+    """'1h 30min' / '10min' / '45s' -> segundos."""
+    import re
+    fat = {"us": 1e-6, "ms": 1e-3, "s": 1, "sec": 1, "min": 60, "m": 60, "h": 3600, "d": 86400, "w": 604800}
+    total = 0
+    for n, u in re.findall(r"([\d.]+)\s*([a-z]+)", valor or ""):
+        total += float(n) * fat.get(u, 0)
+    return total or None
+
+
+def api_agenda(_con):
+    """Só o que tem execução prevista: cada disparo das próximas AGENDA_HORAS, em ordem de hora."""
+    import re
+    import subprocess
+    agora = time.time()
+    if _agenda_cache[1] and agora - _agenda_cache[0] < 30:
+        return _agenda_cache[1]
+    limite = agora + AGENDA_HORAS * 3600
+    previstos, recorrentes = [], []
+    timers = json.loads(systemctl("list-timers", "--all", "-o", "json") or "[]")
+    tprops = propriedades([t["activates"] for t in timers if t.get("activates")],
+                          ["Id", "Description", "ExecStart", "WorkingDirectory", "FragmentPath"])
+    tcal = propriedades([t["unit"] for t in timers], ["Id", "TimersCalendar", "TimersMonotonic"])
+    for t in timers:
+        sp = tprops.get(t.get("activates"), {})
+        if sp.get("FragmentPath", "").startswith("/usr/") or t["unit"].startswith("snap."):
+            continue
+        item = {
+            "unidade": t["unit"].removesuffix(".timer"),
+            "o_que": sp.get("Description", "")[:140],
+            "projeto": projeto_do_texto(sp.get("WorkingDirectory", "")) or projeto_do_texto(sp.get("ExecStart", "")),
+            "fonte": "systemd",
+        }
+        tp = tcal.get(t["unit"], {})
+        specs = [s.strip() for s in re.findall(r"OnCalendar=([^;]+?)\s;", tp.get("TimersCalendar", ""))]
+        vezes = set()
+        for spec in specs:
+            vezes.update(proximas_calendario(spec, agora, limite))
+            item.setdefault("regra", spec)
+        intervalo = None
+        for chave, valor in re.findall(r"(OnUnitActiveUSec|OnUnitInactiveUSec|OnActiveUSec)=([^;]+?)\s;",
+                                       tp.get("TimersMonotonic", "")):
+            intervalo = segundos_systemd(valor)
+            item.setdefault("regra", "a cada " + valor.strip())
+        nxt = t["next"] / 1e6 if t.get("next") else None
+        if intervalo and intervalo <= 3600:
+            recorrentes.append({**item, "proxima": nxt, "intervalo_s": intervalo})
+            continue
+        if intervalo and nxt:
+            k = nxt
+            while k <= limite:
+                vezes.add(k)
+                k += intervalo
+        if not vezes and nxt and agora < nxt <= limite:
+            vezes.add(nxt)
+        for v in vezes:
+            previstos.append({**item, "quando": v})
+    cron = subprocess.run(["crontab", "-l"], capture_output=True, text=True, timeout=5).stdout
+    for linha in cron.splitlines():
+        linha = linha.strip()
+        if not linha or linha.startswith("#") or "=" in linha.split()[0]:
+            continue
+        partes = linha.split(None, 5)
+        if len(partes) < 6:
+            continue
+        expr, comando = " ".join(partes[:5]), partes[5]
+        script = next((os.path.basename(w) for w in comando.split()
+                       if "/" in w and w.endswith((".sh", ".py", ".mjs", ".js"))), None)
+        item = {"unidade": script or comando.split()[0][-40:], "o_que": comando.replace(HOME, "~")[:140],
+                "projeto": projeto_do_texto(comando), "fonte": "cron", "regra": "cron " + expr}
+        k = proximo_cron(expr, agora)
+        if k is None:
+            recorrentes.append({**item, "proxima": None, "intervalo_s": None})
+        while k and k <= limite:
+            previstos.append({**item, "quando": k})
+            k = proximo_cron(expr, k)
+    previstos.sort(key=lambda r: r["quando"])
+    recorrentes.sort(key=lambda r: (r["intervalo_s"] or 9e9, r["unidade"]))
+    resultado = {"agora": agora, "horas": AGENDA_HORAS, "previstos": previstos, "recorrentes": recorrentes}
+    _agenda_cache[:] = [agora, resultado]
+    return resultado
+
+
 ROTAS = {
+    "/api/agenda": api_agenda,
+    "/api/sessao": api_sessao,
     "/api/consumo": api_consumo,
     "/api/agora": api_agora,
     "/api/processamentos": api_processamentos,
@@ -451,7 +639,9 @@ class Handler(BaseHTTPRequestHandler):
             cliente = None
         if cliente is None or not any(cliente in r for r in REDES):
             return self.responder(403, b"fora da rede permitida", "text/plain")
-        caminho = self.path.split("?", 1)[0]
+        from urllib.parse import parse_qs
+        caminho, _, consulta = self.path.partition("?")
+        params = {k: v[0] for k, v in parse_qs(consulta).items()}
         if caminho in ("/", "/index.html"):
             with open(PAGINA, "rb") as f:
                 return self.responder(200, f.read(), "text/html; charset=utf-8")
@@ -461,7 +651,10 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 con = conectar()
                 try:
-                    dados = ROTAS[caminho](con)
+                    if caminho == "/api/sessao":
+                        dados = api_sessao(con, params.get("id", ""))
+                    else:
+                        dados = ROTAS[caminho](con)
                 finally:
                     con.close()
                 return self.responder(200, json.dumps(dados, ensure_ascii=False).encode(), "application/json")
