@@ -219,3 +219,21 @@ cd ~/projetos/ccdashboard/telemetria
 Só pausar o painel (hooks continuam gravando): `systemctl --user stop telemetria-painel.service`.
 Só o Codex ou só o OTLP: `TELEMETRIA_CODEX=0` / `TELEMETRIA_OTLP=0` no serviço. Os hooks e o OTel valem
 para sessões novas e para o próximo evento das abertas; o OTel só pega sessões abertas depois de ligado.
+
+## 11. Rede: upload por sessão (15/10/2026)
+
+Na live de 15/10 (OBS no PC local, mesma Starlink deste servidor) o YouTube engasgou; TikTok/Insta/Face não.
+Este servidor subia **16–22 Mbps** pela Starlink (`enP7s7`): sessões Claude reenviando o contexto (com imagens)
+para a API da Anthropic (`160.79.104.10`, `2607:6bc0::10`) e um upload do yt-pubx (Google). Latência e perda
+estavam normais, então o limite era a banda de subida. Pausar o yt-pubx e as sessões derrubou o upload para 0,2–8 Mbps.
+
+Ferramentas (ficam no projeto wifi, que é o hub de monitoramento): `~/projetos/wifi/MONITOR-REDE.md`
+
+- `~/projetos/wifi/monitor-upload.sh [iface] [janela]`: sem sudo; IP remoto, serviço, processo:PID,
+  **pasta da sessão e há quanto tempo está aberta**. Só TCP do servidor; o resto aparece como "sem atribuição".
+- `~/.local/bin/bandwhich` v0.23.1 (ARM64): por pacote, inclui UDP. Liga com
+  `sudo setcap cap_sys_ptrace,cap_dac_read_search,cap_net_raw,cap_net_admin+ep ~/.local/bin/bandwhich`
+  e desliga com `sudo setcap -r ~/.local/bin/bandwhich`.
+
+Nenhum dos dois roda sozinho. Ideia para depois (não aprovada): aba **Rede** no painel com upload por sessão
+(mesmo cruzamento PID → cwd → sessão que o monitor faz) e um aviso quando a subida passar de um teto durante a live.
