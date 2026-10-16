@@ -65,7 +65,7 @@ tr.perto td{background:rgba(226,162,59,.08)}
 <main id="conteudo"></main>
 <div id="modal"><div class="caixa" id="modalCaixa"></div></div>
 <script>
-const ABAS=[["agora","Agora"],["rotinas","Rotinas"],["agenda","Agenda"],["processamentos","Processamentos"],["consumo","Consumo"],["falhas","Falhas"],["uso","Uso (7 dias)"],["historico","Histórico"],["saude","Saúde"]];
+const ABAS=[["agora","Agora"],["rotinas","Rotinas"],["agenda","Agenda"],["processamentos","Processamentos"],["consumo","Consumo"],["falhas","Falhas"],["uso","Uso (7 dias)"],["historico","Histórico"],["vps","VPS"],["saude","Saúde"]];
 let aba=(()=>{try{return localStorage.getItem("aba")||"agora"}catch(e){return "agora"}})();
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -75,6 +75,14 @@ function tabela(cols,rows){if(!rows.length)return'<div class="vazio">Nada por aq
 function barras(rows){const m=Math.max(1,...rows.map(r=>r.n));return tabela([["Nome",r=>esc(r.nome)],["Usos",r=>r.n],["",r=>'<div class="bar" style="width:'+(100*r.n/m)+'%"></div>']],rows)}
 const quando=t=>{if(!t)return"—";const d=new Date(t*1000),h=new Date();const dia=d.toDateString()===h.toDateString()?"hoje":(d-h<2*864e5&&d>h&&d.getDate()===new Date(+h+864e5).getDate()?"amanhã":d.toLocaleDateString("pt-BR",{weekday:"short",day:"2-digit",month:"2-digit"}));return dia+" "+hora(t)};
 const R={
+vps(d){const pct=v=>{const m=/\((\d+)%\)/.exec(v&&v.vivo&&v.vivo.disco||"");return m?+m[1]:null};
+ const est=v=>!v.vivo?'<span class="mut">aguardando 1ª leitura</span>':v.vivo.ok?'<span class="selo s-processando">no ar</span>':'<span class="selo s-parada">sem acesso</span> <span class="mut">'+esc(v.vivo.erro||"")+"</span>";
+ const disco=v=>{const p=pct(v);return v.vivo&&v.vivo.ok?'<b style="color:'+(p>=85?"var(--err)":p>=70?"var(--warn)":"inherit")+'">'+esc(v.vivo.disco)+"</b>":"—"};
+ let h='<div class="kpis">'+[["VPS",d.vps.length],["No ar",d.vps.filter(v=>v.vivo&&v.vivo.ok).length],["Disco ≥ 70%",d.vps.filter(v=>(pct(v)||0)>=70).length]].map(k=>'<div class="kpi"><b>'+k[1]+"</b><span>"+k[0]+"</span></div>").join("")+"</div>";
+ h+='<p class="mut">'+esc(d.nota)+" Inventário de "+esc(d.atualizado)+".</p>";
+ h+=tabela([["VPS",v=>"<b>"+esc(v.id.toUpperCase())+'</b><div class="mut">'+esc(v.nome)+(v.hostname!==v.nome?" · "+esc(v.hostname):"")+"</div>"],["Endereço",v=>"<code>"+esc(v.ip)+"</code>"+(v.dominios.length?'<div class="mut">'+v.dominios.map(esc).join("<br>")+"</div>":"")],["Provedor",v=>esc(v.provedor)+'<div class="mut">'+esc(v.plano)+" · "+esc(v.local)+"</div>"],["Estado",est],["Disco",disco],["RAM",v=>v.vivo&&v.vivo.ok?esc(v.vivo.ram):"—"],["No ar há",v=>v.vivo&&v.vivo.ok?esc(v.vivo.uptime):"—"]],d.vps);
+ h+='<div class="grid">'+d.vps.map(v=>'<div class="card"><h3>'+esc(v.id.toUpperCase())+" · "+esc(v.nome)+' <span class="mut">'+esc(v.ip)+"</span></h3><ul>"+v.roda.map(r=>"<li>"+esc(r)+"</li>").join("")+"</ul>"+(v.obs?'<div class="mut">'+esc(v.obs)+"</div>":"")+'<div class="mut">Chave: '+esc(v.chave)+"</div>"+(v.deploy?'<div class="mut">Deploy: <code>'+esc(v.deploy)+"</code></div>":"")+"</div>").join("")+"</div>";
+ return h},
 agenda(d){const ate=d.agora,prox=d.previstos;let h='<div class="kpis">'+[["Disparos previstos ("+d.horas+" h)",prox.length],["Próxima hora",prox.filter(r=>r.quando-ate<3600).length],["Próximas 3 h",prox.filter(r=>r.quando-ate<3*3600).length],["Recorrentes (≤ 1 h)",d.recorrentes.length]].map(k=>'<div class="kpi"><b>'+k[1]+"</b><span>"+k[0]+"</span></div>").join("")+"</div>";
  if(d.grade&&d.grade.length){let ult=null;h+='<h2>Horários fixos por projeto</h2><div class="wrap"><table><tr><th>Projeto</th><th>Horário</th><th>O quê</th><th>Próxima</th></tr>'+d.grade.map(r=>{const p=r.projeto||"—",novo=p!==ult;ult=p;return'<tr'+(novo?' style="border-top:2px solid var(--borda,#333)"':"")+"><td>"+(novo?"<b>"+esc(p)+"</b>":"")+'</td><td style="white-space:nowrap"><b>'+esc(r.horario)+"</b></td><td>"+esc(r.nome)+' <code class="mut">'+esc(r.unidade)+"</code>"+(r.rodando?' <span class="selo s-processando">rodando agora</span>':r.parado?' <span class="mut">(parado)</span>':"")+'</td><td class="mut">'+(r.proxima?quando(r.proxima):"—")+"</td></tr>"}).join("")+"</table></div><h2>Próximas "+d.horas+" h</h2>"}
  if(!prox.length)h+='<div class="vazio">Nada previsto nas próximas '+d.horas+" h.</div>";

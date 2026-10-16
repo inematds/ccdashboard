@@ -237,3 +237,9 @@ Ferramentas (ficam no projeto wifi, que é o hub de monitoramento): `~/projetos/
 
 Nenhum dos dois roda sozinho. Ideia para depois (não aprovada): aba **Rede** no painel com upload por sessão
 (mesmo cruzamento PID → cwd → sessão que o monitor faz) e um aviso quando a subida passar de um teto durante a live.
+
+## 12. Aba VPS (16/10/2026)
+
+- Inventário das 6 VPS (VPS1–VPS6: 5 Hetzner + 1 Hostinger) em `painel/vps.json`, escrito à mão; detalhe em `~/projetos/wifi/VPS.md`.
+- `servidor.py` sobe `laco_vps()`: a cada `TELEMETRIA_VPS_MIN` (padrão 10) min faz SSH `BatchMode` (chave, sem senha) e lê disco, RAM e uptime; `/api/vps` só devolve o cache. Desligar: `TELEMETRIA_VPS=0`.
+- Disco ≥ 70% fica amarelo, ≥ 85% vermelho; VPS sem resposta aparece "sem acesso" com o erro do SSH.

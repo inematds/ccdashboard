@@ -1,0 +1,51 @@
+{
+  "atualizado": "2026-10-16",
+  "nota": "Inventário escrito à mão (detalhe em ~/projetos/wifi/VPS.md). Disco, RAM e uptime são lidos ao vivo por SSH a cada 10 min.",
+  "vps": [
+    {
+      "id": "vps1", "nome": "ubuntu-S2", "hostname": "agente2", "ip": "157.180.72.42",
+      "provedor": "Hetzner", "plano": "CX22 · 2 vCPU · 4 GB · 40 GB", "local": "eu-central",
+      "dominios": [],
+      "roda": ["TLGruposVIP em Docker: web (:3002), bot, worker, worker-email, nginx (:80)", "cloudflared (túnel Cloudflare)"],
+      "deploy": "ssh root@157.180.72.42 \"cd /root/projetos/TLGruposVIP && git pull && docker compose up -d --build\"",
+      "chave": "id_ed25519 (padrão)"
+    },
+    {
+      "id": "vps2", "nome": "nano", "hostname": "nano", "ip": "37.27.39.74",
+      "provedor": "Hetzner", "plano": "CX23 · 2 vCPU · 4 GB · 40 GB", "local": "Helsinki",
+      "dominios": ["vps2.inema.club", "cert.inema.pro", "salaconf.inema.pro"],
+      "roda": ["INEMACERT (api :4000, web :4100) + Postgres 16 + Redis", "sala-multiplayer (:4600)", "videoprodutos (:3080)", "nanobot", "bench-studio-br (:5200)", "Caddy (80/443)"],
+      "chave": "id_ed25519 e id_ed25519_inema"
+    },
+    {
+      "id": "vps3", "nome": "ubuntu-4gb-Waldemar", "hostname": "ubuntu-4gb-Waldemar", "ip": "135.181.44.37",
+      "provedor": "Hetzner", "plano": "CX23 · 2 vCPU · 4 GB · 40 GB", "local": "Helsinki",
+      "dominios": ["vps3.inema.club"],
+      "roda": ["terminais-dashboard + terminais-public", "bench-studio-br (:5200, :5300)"],
+      "chave": "id_ed25519 e id_ed25519_inema"
+    },
+    {
+      "id": "vps4", "nome": "mkt3", "hostname": "mkt3", "ip": "62.238.25.84",
+      "provedor": "Hetzner", "plano": "CX23 · 2 vCPU · 4 GB · 40 GB", "local": "Helsinki",
+      "dominios": [],
+      "roda": ["master-dashboard do yt-pub-livesx (:8090)", "pasta timesmkt3 (parada)"],
+      "chave": "id_ed25519 e id_ed25519_inema (instaladas 16/10/2026)"
+    },
+    {
+      "id": "vps5", "nome": "Tiza", "hostname": "Tiza", "ip": "91.107.207.165",
+      "provedor": "Hetzner", "plano": "CX23 · 2 vCPU · 4 GB · 40 GB", "local": "Falkenstein",
+      "dominios": [],
+      "roda": ["inemadlp em Docker (app + Caddy 80/443)", "inemaccbot (gateway Telegram)", "inemaapoio (pm2)"],
+      "obs": "16/10/2026: removidos inemacabot, agent-zero, yt-pub e pastas antigas; disco 99% → 28%. Backup em ~/projetos/output/backup-tiza-2026-10-16/.",
+      "chave": "id_ed25519 (padrão)"
+    },
+    {
+      "id": "vps6", "nome": "srv1162715", "hostname": "srv1162715", "ip": "72.60.148.187",
+      "provedor": "Hostinger", "plano": "KVM · 4 vCPU · 16 GB · 200 GB", "local": "—",
+      "dominios": ["n8n.inema.cloud"],
+      "roda": ["n8n 2.4.8 em Docker (32 workflows, 10 ativos: série nm85 de cobrança/labels INEMA.VIP)", "nginx + certbot (80/443)"],
+      "obs": "Backup do n8n em 16/10/2026: ~/projetos/output/backup-n8n-hostinger-2026-10-16/. ufw desligado.",
+      "chave": "id_ed25519 e id_ed25519_inema (instaladas 16/10/2026)"
+    }
+  ]
+}

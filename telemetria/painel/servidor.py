@@ -738,7 +738,54 @@ def api_agenda(_con):
     return resultado
 
 
+VPS_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vps.json")
+VPS_INTERVALO = int(os.environ.get("TELEMETRIA_VPS_MIN", "10")) * 60
+_vps_vivo = {}  # ip -> {"ts", "ok", "disco", "ram", "uptime", "erro"}
+_vps_trava = threading.Lock()
+
+
+def sonda_vps(ip):
+    """Lê disco, RAM e uptime por SSH (só leitura, sem senha)."""
+    import subprocess
+    cmd = ("df -h / | awk 'NR==2{print $3\"/\"$2\" (\"$5\")\"}'; "
+           "free -h | awk '/Mem/{print $3\"/\"$2}'; uptime -p")
+    try:
+        r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", f"root@{ip}", cmd],
+                           capture_output=True, text=True, timeout=25)
+        linhas_ = r.stdout.strip().splitlines()
+        if r.returncode != 0 or len(linhas_) < 3:
+            return {"ts": time.time(), "ok": False, "erro": (r.stderr.strip().splitlines() or ["sem resposta"])[-1][:120]}
+        return {"ts": time.time(), "ok": True, "disco": linhas_[0], "ram": linhas_[1], "uptime": linhas_[2].replace("up ", "")}
+    except Exception as e:
+        return {"ts": time.time(), "ok": False, "erro": str(e)[:120]}
+
+
+def laco_vps():
+    while True:
+        try:
+            with open(VPS_JSON) as f:
+                ips = [v["ip"] for v in json.load(f)["vps"]]
+            for ip in ips:
+                res = sonda_vps(ip)
+                with _vps_trava:
+                    _vps_vivo[ip] = res
+        except Exception as e:
+            print(f"vps: {e}", flush=True)
+        time.sleep(VPS_INTERVALO)
+
+
+def api_vps(_con):
+    with open(VPS_JSON) as f:
+        dados = json.load(f)
+    with _vps_trava:
+        for v in dados["vps"]:
+            v["vivo"] = _vps_vivo.get(v["ip"])
+    dados["agora"] = time.time()
+    return dados
+
+
 ROTAS = {
+    "/api/vps": api_vps,
     "/api/agenda": api_agenda,
     "/api/sessao": api_sessao,
     "/api/consumo": api_consumo,
@@ -801,6 +848,8 @@ if __name__ == "__main__":
         coletores.servidor_otlp(DB, PORTA_OTLP)
     if os.environ.get("TELEMETRIA_CODEX", "1") == "1":
         coletores.laco_codex(DB)
+    if os.environ.get("TELEMETRIA_VPS", "1") == "1":
+        threading.Thread(target=laco_vps, daemon=True).start()
     servidores = []
     for host in HOSTS:
         try:
